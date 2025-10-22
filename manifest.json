@@ -1,0 +1,39 @@
+{
+  "manifest_version": 3,
+  "name": "Artlist Music Downloader",
+  "version": "2.0.0",
+  "description": "Tải nhạc từ Artlist.io - Hỗ trợ tải bài đang phát!",
+  "permissions": [
+    "activeTab",
+    "downloads",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://artlist.io/*",
+    "https://search-api.artlist.io/*",
+    "https://cms-public-artifacts.artlist.io/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon16.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://artlist.io/*"],
+      "js": ["content.js"],
+      "run_at": "document_start"
+    }
+  ]
+}
