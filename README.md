@@ -9,7 +9,7 @@ Extension Chrome giúp tải nhạc từ Artlist.io một cách dễ dàng và n
 - 📝 **Tên file tự động**: File được đặt tên theo format `{Tên bài hát} - {Nghệ sĩ}.aac`
 - ⚡ **Nhanh chóng**: Tải trực tiếp file âm thanh định dạng AAC chất lượng cao
 - 🎯 **Đơn giản**: Giao diện thân thiện, dễ sử dụng
-**Lưu ý: chỉ tải được nhạc và SFX**
+**Lưu ý: chỉ có thể tải nhạc và SFX**
 ## 📋 Yêu cầu
 
 - Google Chrome hoặc các trình duyệt Chromium-based (Edge, Brave, Opera...)
@@ -120,5 +120,6 @@ Nếu có bất kỳ câu hỏi hoặc góp ý nào, vui lòng tạo issue trên
 ---
 
 **Made with ❤️ for Artlist users**
+
 
 
