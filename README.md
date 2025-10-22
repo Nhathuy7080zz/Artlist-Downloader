@@ -2,7 +2,7 @@
 
 Extension Chrome giúp tải nhạc từ Artlist.io một cách dễ dàng và nhanh chóng.
 
-## ✨ Tính năng **Chỉ có thể tải nhạc và SFX)**
+## ✨ Tính năng **(Chỉ có thể tải nhạc và SFX)**
 
 - 🎧 **Tải bài đang phát**: Tải ngay bài hát đang phát trên Artlist chỉ với một cú click
 - 🔗 **Tải từ link**: Nhập link bài hát Artlist để tải xuống
@@ -120,6 +120,7 @@ Nếu có bất kỳ câu hỏi hoặc góp ý nào, vui lòng tạo issue trên
 ---
 
 **Made with ❤️ for Artlist users**
+
 
 
 
