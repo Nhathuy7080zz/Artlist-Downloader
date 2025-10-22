@@ -19,7 +19,7 @@ Extension Chrome giúp tải nhạc từ Artlist.io một cách dễ dàng và n
 
 1. **Clone hoặc tải project về máy**
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/Nhathuy7080zz/Artlist-Downloader
    ```
 
 2. **Mở Extensions**
@@ -120,3 +120,4 @@ Nếu có bất kỳ câu hỏi hoặc góp ý nào, vui lòng tạo issue trên
 ---
 
 **Made with ❤️ for Artlist users**
+
