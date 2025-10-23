@@ -36,8 +36,8 @@ Chromium-based browser (Edge, Brave, Opera...)
 ### Phương pháp 1: Tải bài đang phát
 
 1. Truy cập [Artlist.io](https://artlist.io)
-2. Phát bài hát bạn muốn tải (Click vào tên bài đó để mở trang riêng của nó)
-3. MởMở extension
+2. Phát bài hát bạn muốn tải
+3. Mở extension
 4. Click **"Tải xuống"**
 5. File sẽ được tải về
 
@@ -114,6 +114,7 @@ Mọi đóng góp đều được hoan nghênh! Vui lòng:
 
 Nếu có bất kỳ câu hỏi hoặc góp ý nào, vui lòng tạo issue trên GitHub.
 Readme wrote by Github Copilot (Claude Sonnet 4.5)
+
 
 
 
