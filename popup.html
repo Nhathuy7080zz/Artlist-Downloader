@@ -8,35 +8,36 @@
 </head>
 <body>
   <div class="container">
-    <h1>🎵 Artlist Downloader</h1>
-    <p class="subtitle">Tải nhạc từ Artlist.io</p>
-    
-    <!-- Nút mới: Tải bài đang phát -->
-    <!-- <button id="downloadCurrentBtn" class="btn-current">
-      <span id="currentBtnText">🎧 Tải bài đang phát</span>
-      <span id="currentBtnLoader" class="loader hidden"></span>
-    </button>
-    
-    <div class="divider">
-      <span>HOẶC</span>
+    <div class="header">
+      <div class="header-left">
+        <h1>🎵 Artlist Downloader</h1>
+        <p class="subtitle" id="subtitle">Tải nhạc từ Artlist.io</p>
+      </div>
+      <button id="langToggle" class="lang-toggle" title="Switch Language">
+        <span id="langText">EN</span>
+      </button>
     </div>
-     -->
+    
     <div class="input-group">
-      <label for="urlInput">Nhập link Artlist:</label>
+      <label for="urlInput" id="urlLabel">Link Artlist (tùy chọn):</label>
       <input 
         type="text" 
         id="urlInput" 
-        placeholder="https://artlist.io/royalty-free-music/song/abcxyz/123456"
+        placeholder="https://artlist.io/royalty-free-music/song/..."
         autocomplete="off"
       >
     </div>
-
+    
     <button id="downloadBtn" class="btn-primary">
-      <span id="btnText">Tải xuống</span>
+      <span id="btnText">🎧 Tải nhạc</span>
       <span id="btnLoader" class="loader hidden"></span>
     </button>
 
     <div id="status" class="status hidden"></div>
+    
+    <div class="info-text" id="infoText">
+      💡 Để trống để tải bài đang mở/phát, hoặc dán link để tải bài cụ thể
+    </div>
   </div>
   <script src="popup.js"></script>
 </body>

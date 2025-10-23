@@ -9,51 +9,45 @@ const cachedSfxData = [];
 
 // Storage cho current playing song
 let currentPlayingSong = null;
-
-// Monitor audio element để detect bài hát đang phát
-function monitorAudioPlayer() {
-  const checkAudio = setInterval(() => {
-    const audioElement = document.querySelector('audio');
-    if (audioElement) {
-      console.log('🎵 Found audio element, monitoring...');
-      
-      // Lắng nghe khi bài hát được play
-      audioElement.addEventListener('play', function() {
-        console.log('▶️ Song started playing');
-        detectCurrentSong();
-      });
-      
-      // Lắng nghe khi src thay đổi
-      const observer = new MutationObserver(() => {
-        if (audioElement.src) {
-          console.log('🔄 Audio source changed:', audioElement.src);
-          detectCurrentSong();
-        }
-      });
-      
-      observer.observe(audioElement, { 
-        attributes: true, 
-        attributeFilter: ['src'] 
-      });
-      
-      clearInterval(checkAudio);
-    }
-  }, 1000);
-  
-  // Stop sau 30 giây nếu không tìm thấy
-  setTimeout(() => clearInterval(checkAudio), 30000);
-}
+let isDetecting = false; // Flag to prevent concurrent detection
+let lastDetectionTime = 0; // Timestamp of last detection
 
 // Detect bài hát đang phát
 function detectCurrentSong() {
+  // Debounce: không detect nếu vừa detect trong vòng 1 giây
+  const now = Date.now();
+  if (now - lastDetectionTime < 1000) {
+    console.log('⏭️ Skipping detection (too soon)');
+    return;
+  }
+  
+  // Prevent concurrent detection
+  if (isDetecting) {
+    console.log('⏭️ Detection already in progress');
+    return;
+  }
+  
+  isDetecting = true;
+  lastDetectionTime = now;
+  
   try {
+    console.log('🔍 Detecting current song...');
     const songInfo = extractSongInfoFromUI();
-    if (!songInfo) return;
+    
+    if (!songInfo) {
+      console.log('❌ No song info extracted from UI');
+      return;
+    }
+    
+    console.log('✅ Song info extracted:', songInfo);
     
     let audioUrl = '';
     const audioElement = document.querySelector('audio');
     if (audioElement) {
       audioUrl = audioElement.currentSrc || audioElement.src || '';
+      console.log('🎵 Audio URL:', audioUrl);
+    } else {
+      console.log('⚠️ No audio element found');
     }
     
     currentPlayingSong = {
@@ -61,8 +55,93 @@ function detectCurrentSong() {
       sitePlayableFilePath: audioUrl,
       detectedAt: Date.now()
     };
+    
+    console.log('💾 Current playing song saved:', currentPlayingSong);
   } catch (error) {
-    // Silent fail
+    console.error('❌ Error detecting current song:', error);
+  } finally {
+    isDetecting = false;
+  }
+}
+
+// Monitor audio element để detect bài hát đang phát
+function monitorAudioPlayer() {
+  console.log('🎧 Starting audio player monitor...');
+  
+  let audioElement = null;
+  let isMonitoring = false;
+  
+  const setupAudioMonitoring = (audio) => {
+    if (isMonitoring) return;
+    isMonitoring = true;
+    
+    console.log('🎵 Setting up audio monitoring...');
+    
+    // Lắng nghe khi bài hát được play
+    audio.addEventListener('play', function() {
+      console.log('▶️ Song started playing');
+      setTimeout(() => detectCurrentSong(), 500); // Delay 500ms để UI update
+    });
+    
+    // Lắng nghe khi src thay đổi
+    audio.addEventListener('loadeddata', function() {
+      console.log('📥 Audio loaded:', audio.src);
+      setTimeout(() => detectCurrentSong(), 500);
+    });
+    
+    // Lắng nghe khi timeupdate (bài đang phát)
+    let lastCheck = 0;
+    audio.addEventListener('timeupdate', function() {
+      const now = Date.now();
+      if (now - lastCheck > 5000) { // Check mỗi 5 giây
+        lastCheck = now;
+        detectCurrentSong();
+      }
+    });
+    
+    // Observer để theo dõi attribute changes
+    const observer = new MutationObserver(() => {
+      if (audio.src && audio.currentSrc) {
+        console.log('🔄 Audio source changed:', audio.src);
+        setTimeout(() => detectCurrentSong(), 500);
+      }
+    });
+    
+    observer.observe(audio, { 
+      attributes: true, 
+      attributeFilter: ['src', 'currentSrc'] 
+    });
+  };
+  
+  // Continuous check for audio element
+  const checkAudio = () => {
+    const audio = document.querySelector('audio');
+    if (audio && audio !== audioElement) {
+      audioElement = audio;
+      isMonitoring = false;
+      console.log('🎵 Found audio element!');
+      setupAudioMonitoring(audio);
+      
+      // Detect ngay lập tức nếu đang phát
+      if (!audio.paused) {
+        setTimeout(() => detectCurrentSong(), 1000);
+      }
+    }
+  };
+  
+  // Check ngay lập tức
+  checkAudio();
+  
+  // Check định kỳ mỗi 2 giây
+  setInterval(checkAudio, 2000);
+  
+  // Detect khi trang load xong
+  if (document.readyState === 'complete') {
+    setTimeout(() => detectCurrentSong(), 2000);
+  } else {
+    window.addEventListener('load', () => {
+      setTimeout(() => detectCurrentSong(), 2000);
+    });
   }
 }
 
@@ -73,33 +152,204 @@ function extractSongInfoFromUI() {
     let artistName = '';
     let songId = '';
     
-    const allRows = document.querySelectorAll('div, tr, li');
+    // METHOD 1: Tìm từ player bar ở bottom (chính xác nhất)
+    // Thử nhiều selector khác nhau vì Artlist thường thay đổi class names
+    const playerBar = document.querySelector('[data-testid="MusicPlayer"]') || 
+                      document.querySelector('[data-testid="AudioPlayer"]') ||
+                      document.querySelector('[class*="MusicPlayer"]') ||
+                      document.querySelector('[class*="AudioPlayer"]') ||
+                      document.querySelector('[class*="player" i]:has(audio)') ||
+                      document.querySelector('div[class*="Player" i]:has(audio)') ||
+                      document.querySelector('footer:has(audio)') ||
+                      document.querySelector('div[role="region"]:has(audio)');
     
-    for (const row of allRows) {
-      const pauseBtn = row.querySelector('button[aria-label*="Pause"]') ||
-                       row.querySelector('button[title*="Pause"]') ||
-                       row.querySelector('button[aria-label*="pause"]') ||
-                       row.querySelector('svg[aria-label*="pause"]');
+    if (playerBar) {
+      console.log('🎯 Found player bar element:', playerBar);
       
-      if (pauseBtn) {
-        const songLink = row.querySelector('a[href*="/song/"]');
-        if (songLink) {
-          songName = songLink.textContent?.trim() || '';
-          const href = songLink.getAttribute('href') || '';
-          const parts = href.split('/');
-          songId = parts[parts.length - 1];
-        }
+      // Thử tìm tất cả các link trong player bar
+      const allLinks = playerBar.querySelectorAll('a[href*="/song/"]');
+      console.log('Found links in player:', allLinks.length);
+      
+      const songLink = allLinks[0]; // Lấy link đầu tiên
+      const artistLink = playerBar.querySelector('a[href*="/artist/"]');
+      
+      if (songLink) {
+        songName = songLink.textContent?.trim() || songLink.innerText?.trim() || '';
+        const href = songLink.getAttribute('href') || '';
+        const parts = href.split('/');
+        songId = parts[parts.length - 1].split('?')[0];
+        console.log('Found songName:', songName, 'songId:', songId);
+      }
+      
+      if (artistLink) {
+        artistName = artistLink.textContent?.trim() || artistLink.innerText?.trim() || '';
+        console.log('Found artistName:', artistName);
+      }
+      
+      if (songName) {
+        console.log('✅ Found song from player bar:', songName);
+        return {
+          songId: songId || 'unknown',
+          songName: songName,
+          artistId: '',
+          artistName: artistName || 'Unknown Artist',
+          albumId: '',
+          albumName: songName
+        };
+      }
+    } else {
+      console.log('❌ Player bar not found, trying alternative methods...');
+    }
+    
+    // METHOD 2: Tìm từ audio element và match với URL
+    const audioElement = document.querySelector('audio');
+    if (audioElement && audioElement.src) {
+      console.log('🎵 Found audio element with src:', audioElement.src);
+      
+      // Extract song ID from audio URL if possible
+      const audioUrl = audioElement.src;
+      const urlMatch = audioUrl.match(/\/(\d+)\./);
+      if (urlMatch) {
+        const possibleSongId = urlMatch[1];
+        console.log('Extracted possible song ID from audio:', possibleSongId);
         
-        const artistLink = row.querySelector('a[href*="/artist/"]');
-        if (artistLink) {
-          artistName = artistLink.textContent?.trim() || '';
+        // Try to find corresponding link on page
+        const possibleLink = document.querySelector(`a[href*="/song/${possibleSongId}"]`);
+        if (possibleLink) {
+          songName = possibleLink.textContent?.trim() || possibleLink.innerText?.trim() || '';
+          songId = possibleSongId;
+          console.log('✅ Matched audio to song link:', songName);
         }
-        
-        if (songName) break;
       }
     }
     
-    if (!songName) return null;
+    // METHOD 3: Check if we're in album/modal view with detail opened
+    const modal = document.querySelector('[role="dialog"]') || 
+                  document.querySelector('[data-testid="Modal"]') ||
+                  document.querySelector('[class*="Modal" i]');
+    
+    if (modal) {
+      console.log('🎯 Found modal, extracting from modal...');
+      const songLink = modal.querySelector('a[href*="/song/"]');
+      const artistLink = modal.querySelector('a[href*="/artist/"]');
+      
+      if (songLink) {
+        songName = songLink.textContent?.trim() || songLink.innerText?.trim() || '';
+        const href = songLink.getAttribute('href') || '';
+        const parts = href.split('/');
+        songId = parts[parts.length - 1].split('?')[0];
+      }
+      
+      if (artistLink) {
+        artistName = artistLink.textContent?.trim() || artistLink.innerText?.trim() || '';
+      }
+      
+      if (songName) {
+        console.log('✅ Found song from modal:', songName);
+        return {
+          songId: songId || 'unknown',
+          songName: songName,
+          artistId: '',
+          artistName: artistName || 'Unknown Artist',
+          albumId: '',
+          albumName: songName
+        };
+      }
+    }
+    
+    // METHOD 4: Tìm row có pause button VÀ có visual indicator (playing state)
+    const audioTable = document.querySelector('table[data-testid="AudioTable"]') ||
+                       document.querySelector('div[data-testid="ComposableAudioList"]') ||
+                       document.querySelector('table') ||
+                       document.querySelector('[role="table"]');
+    
+    if (audioTable) {
+      console.log('📊 Found table, searching for playing row...');
+      
+      // Tìm tất cả rows có pause button
+      const allRows = audioTable.querySelectorAll('tr, div[role="row"], div[class*="row" i]');
+      console.log('Found rows:', allRows.length);
+      
+      for (const row of allRows) {
+        // Check xem row này có pause button không (nhiều cách khác nhau)
+        const pauseBtn = row.querySelector('button[aria-label*="Pause" i]') ||
+                         row.querySelector('button[title*="Pause" i]') ||
+                         row.querySelector('button[aria-label*="Tạm dừng" i]') ||
+                         row.querySelector('svg[data-icon="pause"]') ||
+                         row.querySelector('svg[aria-label*="pause" i]') ||
+                         row.querySelector('[class*="pause" i]');
+        
+        if (pauseBtn) {
+          console.log('⏸️ Found pause button in row');
+          
+          // Check xem button có visible và not disabled
+          const isVisible = pauseBtn.offsetParent !== null;
+          const buttonElement = pauseBtn.closest('button') || pauseBtn;
+          const isDisabled = buttonElement?.disabled || buttonElement?.getAttribute('disabled');
+          
+          console.log('Pause button visible:', isVisible, 'disabled:', isDisabled);
+          
+          if (isVisible && !isDisabled) {
+            const songLink = row.querySelector('a[href*="/song/"]');
+            if (songLink) {
+              songName = songLink.textContent?.trim() || songLink.innerText?.trim() || '';
+              const href = songLink.getAttribute('href') || '';
+              const parts = href.split('/');
+              songId = parts[parts.length - 1].split('?')[0];
+            }
+            
+            const artistLink = row.querySelector('a[href*="/artist/"]');
+            if (artistLink) {
+              artistName = artistLink.textContent?.trim() || artistLink.innerText?.trim() || '';
+            }
+            
+            if (songName) {
+              console.log('✅ Found playing song from table:', songName);
+              return {
+                songId: songId || 'unknown',
+                songName: songName,
+                artistId: '',
+                artistName: artistName || 'Unknown Artist',
+                albumId: '',
+                albumName: songName
+              };
+            }
+          }
+        }
+      }
+      
+      console.log('❌ No playing row found in table');
+    } else {
+      console.log('❌ No table found');
+    }
+    
+    // METHOD 5: Try extracting from page title or meta tags
+    if (!songName) {
+      console.log('🔍 Trying to extract from page metadata...');
+      
+      // Check document title (format: "Song Name - Artist | Artlist")
+      const title = document.title;
+      if (title && title.includes(' - ') && title.includes('Artlist')) {
+        const parts = title.split(' - ');
+        if (parts.length >= 2) {
+          songName = parts[0].trim();
+          artistName = parts[1].split('|')[0].trim();
+          console.log('📄 Extracted from title:', songName, 'by', artistName);
+        }
+      }
+      
+      // Try to find song ID from current URL if on song page
+      if (window.location.pathname.includes('/song/')) {
+        const pathParts = window.location.pathname.split('/');
+        songId = pathParts[pathParts.length - 1].split('?')[0];
+        console.log('📍 Extracted song ID from URL:', songId);
+      }
+    }
+    
+    if (!songName) {
+      console.log('❌ Could not find song info from UI');
+      return null;
+    }
     
     return {
       songId: songId || 'unknown',
@@ -111,6 +361,7 @@ function extractSongInfoFromUI() {
     };
     
   } catch (error) {
+    console.error('Error extracting song info:', error);
     return null;
   }
 }
@@ -222,8 +473,33 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     // Detect lại để đảm bảo có thông tin mới nhất
     detectCurrentSong();
     
-    if (currentPlayingSong) {
+    if (currentPlayingSong && currentPlayingSong.songName) {
       console.log('✅ Returning current playing song:', currentPlayingSong);
+      
+      // Nếu có songId nhưng chưa có download link, thử fetch từ API
+      if (currentPlayingSong.songId && !currentPlayingSong.sitePlayableFilePath) {
+        console.log('⚠️ Have songId but no download link, fetching from API...');
+        
+        fetchSongFromPageContext(currentPlayingSong.songId)
+          .then(apiData => {
+            if (apiData && apiData.sitePlayableFilePath) {
+              const enriched = { ...currentPlayingSong, ...apiData };
+              console.log('✅ Enriched with API data:', enriched);
+              sendResponse({ success: true, data: enriched });
+            } else {
+              // Vẫn return data hiện tại, có thể dùng audio URL
+              console.log('⚠️ API failed, returning current data with audio URL');
+              sendResponse({ success: true, data: currentPlayingSong });
+            }
+          })
+          .catch(err => {
+            console.error('API error:', err);
+            sendResponse({ success: true, data: currentPlayingSong });
+          });
+        
+        return true;
+      }
+      
       sendResponse({ success: true, data: currentPlayingSong });
     } else {
       console.log('❌ No song currently playing');
@@ -232,6 +508,28 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         error: 'Không có bài hát nào đang phát. Vui lòng phát một bài hát!' 
       });
     }
+    
+    return true;
+  }
+  
+  // NEW: Get any song from page (fallback)
+  if (request.action === 'getAnySong') {
+    console.log('🔍 Getting any song from page...');
+    
+    scrapeSongDataFromPage()
+      .then(songData => {
+        if (songData && songData.sitePlayableFilePath) {
+          console.log('✅ Found song on page:', songData);
+          sendResponse({ success: true, data: songData });
+        } else {
+          console.log('❌ No song found on page');
+          sendResponse({ success: false, error: 'No song found' });
+        }
+      })
+      .catch(error => {
+        console.error('❌ Error getting song from page:', error);
+        sendResponse({ success: false, error: error.message });
+      });
     
     return true;
   }
@@ -335,30 +633,111 @@ async function scrapeSongDataFromPage() {
   try {
     console.log('🔍 Attempting to scrape song data from page...');
     
-    // Lấy song ID từ URL
-    const urlParts = window.location.pathname.split('/');
-    const songId = urlParts[urlParts.length - 1];
-    
-    // Tìm title
-    const titleElement = document.querySelector('h1[data-testid="Heading"]');
-    if (!titleElement) {
-      console.warn('⚠️ Could not find title element');
-      return null;
-    }
-    const title = titleElement.textContent.trim();
-    
-    // Tìm artist
+    let songId = '';
+    let title = '';
     let artistName = 'Unknown';
     let artistId = '';
-    const artistLinks = document.querySelectorAll('a[data-testid="Link"]');
-    for (const link of artistLinks) {
-      const href = link.getAttribute('href');
-      if (href && href.includes('/artist/')) {
-        artistName = link.textContent.trim();
-        const parts = href.split('/');
-        artistId = parts[parts.length - 1];
-        break;
+    
+    // Check if we're on an album page with a modal/detail view open
+    const isAlbumPage = window.location.pathname.includes('/album/');
+    
+    if (isAlbumPage) {
+      console.log('📀 Detected album page, looking for active/selected song...');
+      
+      // Method 1: Tìm modal hoặc detail view đang mở
+      const modal = document.querySelector('[role="dialog"]') || 
+                    document.querySelector('[data-testid="Modal"]') ||
+                    document.querySelector('.modal') ||
+                    document.querySelector('[class*="Modal"]');
+      
+      if (modal) {
+        console.log('🎯 Found modal/detail view');
+        
+        // Tìm song link trong modal
+        const songLink = modal.querySelector('a[href*="/song/"]');
+        if (songLink) {
+          const href = songLink.getAttribute('href');
+          const parts = href.split('/');
+          songId = parts[parts.length - 1];
+          title = songLink.textContent?.trim() || '';
+          console.log('✅ Extracted from modal:', { songId, title });
+        }
+        
+        // Tìm artist trong modal
+        const artistLink = modal.querySelector('a[href*="/artist/"]');
+        if (artistLink) {
+          artistName = artistLink.textContent?.trim() || 'Unknown';
+          const href = artistLink.getAttribute('href');
+          const parts = href.split('/');
+          artistId = parts[parts.length - 1];
+        }
       }
+      
+      // Method 2: Tìm row có class active/selected/playing
+      if (!songId) {
+        console.log('🔍 Looking for active row in table...');
+        const rows = document.querySelectorAll('tr, div[role="row"], [class*="row"]');
+        
+        for (const row of rows) {
+          // Check for active/selected/playing indicators
+          const hasActiveClass = row.className.includes('active') || 
+                                 row.className.includes('selected') ||
+                                 row.className.includes('playing') ||
+                                 row.className.includes('current');
+          
+          const hasActiveAttribute = row.getAttribute('aria-selected') === 'true' ||
+                                    row.getAttribute('data-active') === 'true' ||
+                                    row.getAttribute('data-selected') === 'true';
+          
+          if (hasActiveClass || hasActiveAttribute) {
+            const songLink = row.querySelector('a[href*="/song/"]');
+            if (songLink) {
+              const href = songLink.getAttribute('href');
+              const parts = href.split('/');
+              songId = parts[parts.length - 1];
+              title = songLink.textContent?.trim() || '';
+              
+              const artistLink = row.querySelector('a[href*="/artist/"]');
+              if (artistLink) {
+                artistName = artistLink.textContent?.trim() || 'Unknown';
+                const href = artistLink.getAttribute('href');
+                const parts = href.split('/');
+                artistId = parts[parts.length - 1];
+              }
+              
+              console.log('✅ Found active row:', { songId, title });
+              break;
+            }
+          }
+        }
+      }
+    } else {
+      // Not an album page, use URL-based detection
+      const urlParts = window.location.pathname.split('/');
+      songId = urlParts[urlParts.length - 1];
+      
+      // Tìm title
+      const titleElement = document.querySelector('h1[data-testid="Heading"]');
+      if (titleElement) {
+        title = titleElement.textContent.trim();
+      }
+      
+      // Tìm artist
+      const artistLinks = document.querySelectorAll('a[data-testid="Link"]');
+      for (const link of artistLinks) {
+        const href = link.getAttribute('href');
+        if (href && href.includes('/artist/')) {
+          artistName = link.textContent.trim();
+          const parts = href.split('/');
+          artistId = parts[parts.length - 1];
+          break;
+        }
+      }
+    }
+    
+    if (!songId || !title) {
+      console.warn('⚠️ Could not find song ID or title');
+      return null;
     }
     
     // Tìm audio URL - Method 1: Audio element
@@ -383,16 +762,19 @@ async function scrapeSongDataFromPage() {
       }
     }
     
-    // Method 3: Performance API
+    // Method 3: Performance API (last recently loaded .aac file)
     if (!audioUrl && window.performance) {
       const resources = performance.getEntriesByType('resource');
-      for (const resource of resources) {
-        if (resource.name.includes('.aac') || resource.name.includes('.m4a') || 
-            resource.name.includes('cms-public-artifacts')) {
-          audioUrl = resource.name;
-          console.log('✅ Found audio URL in performance resources');
-          break;
-        }
+      const audioResources = resources.filter(r => 
+        r.name.includes('.aac') || 
+        r.name.includes('.m4a') || 
+        r.name.includes('cms-public-artifacts')
+      );
+      
+      if (audioResources.length > 0) {
+        // Get the most recent one
+        audioUrl = audioResources[audioResources.length - 1].name;
+        console.log('✅ Found audio URL in performance resources');
       }
     }
     

@@ -1,12 +1,13 @@
 {
   "manifest_version": 3,
   "name": "Artlist Music Downloader",
-  "version": "1.0.0",
-  "description": "Tải nhạc từ Artlist.io - Hỗ trợ tải bài đang phát!",
+  "version": "3.0.0",
+  "description": "Tải nhạc từ Artlist.io - Thông minh, đa ngôn ngữ, dễ dùng!",
   "permissions": [
     "activeTab",
     "downloads",
-    "scripting"
+    "scripting",
+    "storage"
   ],
   "host_permissions": [
     "https://artlist.io/*",
@@ -37,4 +38,3 @@
     }
   ]
 }
-
