@@ -12,7 +12,7 @@ Extension giúp tải nhạc từ Artlist.io một cách dễ dàng và nhanh ch
 **Lưu ý: chỉ có thể tải nhạc và SFX**
 ## 📋 Yêu cầu
 
-- Google Chrome hoặc các trình duyệt Chromium-based (Edge, Brave, Opera...)
+Chromium-based browser (Edge, Brave, Opera...)
 
 ## 🚀 Cài đặt
 
@@ -40,7 +40,7 @@ Extension giúp tải nhạc từ Artlist.io một cách dễ dàng và nhanh ch
 2. Phát bài hát bạn muốn tải
 3. Click vào icon extension trên toolbar
 4. Click nút **"🎧 Tải bài đang phát"**
-5. File sẽ được tải vềvề
+5. File sẽ được tải về
 
 ### Phương pháp 2: Tải từ link
 
@@ -116,3 +116,4 @@ Mọi đóng góp đều được hoan nghênh! Vui lòng:
 
 Nếu có bất kỳ câu hỏi hoặc góp ý nào, vui lòng tạo issue trên GitHub.
 Readme wrote by Github Copilot (Claude Sonnet 4.5)
+
