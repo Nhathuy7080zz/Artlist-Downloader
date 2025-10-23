@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Artlist Music Downloader",
+  "name": "Artlist Downloader Pro",
   "version": "3.0.0",
-  "description": "Tải nhạc từ Artlist.io - Thông minh, đa ngôn ngữ, dễ dùng!",
+  "description": "Download Music & Sound Effects from Artlist.io - Smart, Bilingual, Easy!",
   "permissions": [
     "activeTab",
     "downloads",

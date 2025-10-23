@@ -11,7 +11,7 @@
     <div class="header">
       <div class="header-left">
         <h1>🎵 Artlist Downloader</h1>
-        <p class="subtitle" id="subtitle">Tải nhạc từ Artlist.io</p>
+        <p class="subtitle" id="subtitle">Download Music & SFX</p>
       </div>
       <button id="langToggle" class="lang-toggle" title="Switch Language">
         <span id="langText">EN</span>
@@ -19,25 +19,21 @@
     </div>
     
     <div class="input-group">
-      <label for="urlInput" id="urlLabel">Link Artlist (tùy chọn):</label>
+      <label for="urlInput" id="urlLabel">Link (optional):</label>
       <input 
         type="text" 
         id="urlInput" 
-        placeholder="https://artlist.io/royalty-free-music/song/..."
+        placeholder="https://artlist.io/..."
         autocomplete="off"
       >
     </div>
     
     <button id="downloadBtn" class="btn-primary">
-      <span id="btnText">🎧 Tải nhạc</span>
+      <span id="btnText">🎧 Download</span>
       <span id="btnLoader" class="loader hidden"></span>
     </button>
 
     <div id="status" class="status hidden"></div>
-    
-    <div class="info-text" id="infoText">
-      💡 Để trống để tải bài đang mở/phát, hoặc dán link để tải bài cụ thể
-    </div>
   </div>
   <script src="popup.js"></script>
 </body>

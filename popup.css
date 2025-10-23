@@ -7,15 +7,15 @@
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  min-width: 400px;
+  min-width: 320px;
   margin: 0;
 }
 
 .container {
   background: white;
-  padding: 24px;
+  padding: 16px;
   border-radius: 12px;
-  margin: 16px;
+  margin: 12px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
 }
 
@@ -23,7 +23,7 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  margin-bottom: 20px;
+  margin-bottom: 14px;
 }
 
 .header-left {
@@ -31,16 +31,16 @@ body {
 }
 
 h1 {
-  font-size: 24px;
+  font-size: 20px;
   color: #333;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
   text-align: center;
 }
 
 .subtitle {
   text-align: center;
   color: #666;
-  font-size: 14px;
+  font-size: 12px;
   margin-bottom: 0;
 }
 
@@ -67,23 +67,23 @@ h1 {
 }
 
 .input-group {
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 label {
   display: block;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   color: #333;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 input[type="text"] {
   width: 100%;
-  padding: 12px;
+  padding: 10px;
   border: 2px solid #e0e0e0;
   border-radius: 8px;
-  font-size: 14px;
+  font-size: 13px;
   transition: border-color 0.3s;
 }
 
@@ -94,12 +94,12 @@ input[type="text"]:focus {
 
 .btn-primary {
   width: 100%;
-  padding: 12px 24px;
+  padding: 10px 20px;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
   border: none;
   border-radius: 8px;
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 600;
   cursor: pointer;
   transition: transform 0.2s, box-shadow 0.2s;
@@ -144,10 +144,10 @@ input[type="text"]:focus {
 }
 
 .status {
-  margin-top: 16px;
-  padding: 12px;
+  margin-top: 12px;
+  padding: 10px;
   border-radius: 8px;
-  font-size: 14px;
+  font-size: 13px;
   text-align: center;
 }
 

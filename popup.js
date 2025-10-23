@@ -1,37 +1,34 @@
-// Translations
+// Popup.js - Artlist Downloader v3 (Music + SFX Support)
+
 const translations = {
   vi: {
     title: 'Artlist Downloader',
-    subtitle: 'Tải nhạc từ Artlist.io',
-    downloadBtn: '🎧 Tải nhạc',
-    urlLabel: 'Link Artlist (tùy chọn):',
-    infoText: '💡 Để trống để tải bài đang mở/phát, hoặc dán link để tải bài cụ thể',
-    statusGettingInfo: 'Đang lấy thông tin bài hát...',
+    subtitle: 'Tải Music & Sound Effects',
+    downloadBtn: '🎧 Tải xuống',
+    urlLabel: 'Link (tùy chọn):',
+    statusGettingInfo: 'Đang lấy thông tin...',
     statusGettingLink: 'Đang lấy link tải...',
     statusDownloading: 'Đang tải xuống...',
     statusSuccess: 'Đang tải: ',
-    errorNoTab: 'Không tìm thấy tab. Vui lòng mở trang Artlist trước.',
-    errorNotArtlist: 'Vui lòng mở trang Artlist trước khi sử dụng extension!',
-    errorNoSong: 'Không tìm thấy bài hát. Vui lòng mở trang bài hát hoặc phát nhạc!',
-    errorNoLink: 'Không thể lấy link tải! Vui lòng thử phát nhạc và thử lại.',
-    errorRefresh: 'Không thể kết nối với trang. Vui lòng refresh trang!',
+    errorNoTab: 'Không tìm thấy tab.',
+    errorNotArtlist: 'Vui lòng mở trang Artlist!',
+    errorNoSong: 'Không tìm thấy audio. Vui lòng phát nhạc/SFX!',
+    errorNoLink: 'Không thể lấy link tải!',
     errorGeneral: 'Lỗi: '
   },
   en: {
     title: 'Artlist Downloader',
-    subtitle: 'Download music from Artlist.io',
+    subtitle: 'Download Music & Sound Effects',
     downloadBtn: '🎧 Download',
-    urlLabel: 'Artlist Link (optional):',
-    infoText: '💡 Leave blank to download current song, or paste link for specific song',
-    statusGettingInfo: 'Getting song info...',
+    urlLabel: 'Link (optional):',
+    statusGettingInfo: 'Getting info...',
     statusGettingLink: 'Getting download link...',
     statusDownloading: 'Downloading...',
     statusSuccess: 'Downloading: ',
-    errorNoTab: 'No tab found. Please open Artlist first.',
-    errorNotArtlist: 'Please open Artlist before using this extension!',
-    errorNoSong: 'No song found. Please open a song page or play music!',
-    errorNoLink: 'Cannot get download link! Please try playing music first.',
-    errorRefresh: 'Cannot connect to page. Please refresh the page!',
+    errorNoTab: 'No tab found.',
+    errorNotArtlist: 'Please open Artlist first!',
+    errorNoSong: 'No audio found. Please play music/SFX!',
+    errorNoLink: 'Cannot get download link!',
     errorGeneral: 'Error: '
   }
 };
@@ -55,7 +52,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
   });
   
-  // Auto-fill URL from current tab
+  // Auto-fill URL
   chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
     const currentUrl = tabs[0].url;
     if (currentUrl && currentUrl.includes('artlist.io')) {
@@ -75,18 +72,16 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('subtitle').textContent = t.subtitle;
     document.getElementById('btnText').textContent = t.downloadBtn;
     document.getElementById('urlLabel').textContent = t.urlLabel;
-    document.getElementById('infoText').textContent = t.infoText;
     langText.textContent = currentLang === 'vi' ? 'EN' : 'VI';
   }
 
-  // Main download button - Smart logic
+  // Main download logic
   downloadBtn.addEventListener('click', async function() {
     try {
       setLoading(true);
       const t = translations[currentLang];
       showStatus(t.statusGettingInfo, 'info');
 
-      // Get current tab info
       const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
       if (!tabs[0]) {
         showStatus(t.errorNoTab, 'error');
@@ -101,50 +96,56 @@ document.addEventListener('DOMContentLoaded', function() {
         return;
       }
 
-      let songInfo = null;
+      let audioInfo = null;
       const inputUrl = urlInput.value.trim();
+      const isSfx = currentUrl.includes('/sound-effects/') || currentUrl.includes('/sfx/') ||
+                     inputUrl.includes('/sound-effects/') || inputUrl.includes('/sfx/');
 
-      // Strategy 0: If user provided URL in input, use that (highest priority)
+      // Strategy 0: User provided URL
       if (inputUrl && inputUrl.includes('artlist.io')) {
-        console.log('📝 User provided URL, using that...');
-        if (inputUrl.includes('/royalty-free-music/song/')) {
-          const songId = extractSongIdFromUrl(inputUrl);
-          songInfo = await getSongInfoViaContentScript(songId);
+        if (inputUrl.includes('/song/')) {
+          const songId = extractIdFromUrl(inputUrl);
+          audioInfo = await getAudioInfo(songId, false);
+        } else if (inputUrl.includes('/sfx/')) {
+          const sfxId = extractIdFromUrl(inputUrl);
+          audioInfo = await getAudioInfo(sfxId, true);
         }
       }
 
-      // Strategy 1: If on a song page, download that song
-      if (!songInfo && currentUrl.includes('/royalty-free-music/song/')) {
-        console.log('📍 On song page, downloading this song...');
-        const songId = extractSongIdFromUrl(currentUrl);
-        songInfo = await getSongInfoViaContentScript(songId);
+      // Strategy 1: Current page
+      if (!audioInfo) {
+        if (currentUrl.includes('/song/')) {
+          const songId = extractIdFromUrl(currentUrl);
+          audioInfo = await getAudioInfo(songId, false);
+        } else if (currentUrl.includes('/sfx/')) {
+          const sfxId = extractIdFromUrl(currentUrl);
+          audioInfo = await getAudioInfo(sfxId, true);
+        }
       }
 
-      // Strategy 2: If no song from URL, try currently playing song
-      if (!songInfo || !songInfo.sitePlayableFilePath) {
-        console.log('🎵 Trying to get currently playing song...');
-        songInfo = await getCurrentPlayingSong();
+      // Strategy 2: Currently playing
+      if (!audioInfo || !audioInfo.sitePlayableFilePath) {
+        audioInfo = await getCurrentPlaying();
       }
 
-      // Strategy 3: If still no song, try to get from page context
-      if (!songInfo || !songInfo.sitePlayableFilePath) {
-        console.log('🔍 Trying to scrape from page...');
-        songInfo = await getAnySongFromPage();
+      // Strategy 3: Scrape from page
+      if (!audioInfo || !audioInfo.sitePlayableFilePath) {
+        audioInfo = await getAnyAudioFromPage();
       }
 
-      if (!songInfo) {
+      if (!audioInfo) {
         showStatus(t.errorNoSong, 'error');
         setLoading(false);
         return;
       }
 
-      // If we have song info but no download link, fetch it
-      if (!songInfo.sitePlayableFilePath && songInfo.songId) {
+      // If missing download link, fetch it
+      if (!audioInfo.sitePlayableFilePath && audioInfo.songId) {
         showStatus(t.statusGettingLink, 'info');
-        const fullSongInfo = await getSongInfoViaContentScript(songInfo.songId);
+        const fullInfo = await getAudioInfo(audioInfo.songId, audioInfo.isSfx || false);
         
-        if (fullSongInfo && fullSongInfo.sitePlayableFilePath) {
-          songInfo = { ...songInfo, ...fullSongInfo };
+        if (fullInfo && fullInfo.sitePlayableFilePath) {
+          audioInfo = { ...audioInfo, ...fullInfo };
         } else {
           showStatus(t.errorNoLink, 'error');
           setLoading(false);
@@ -154,8 +155,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
       showStatus(t.statusDownloading, 'info');
 
-      const filename = makeFilename(songInfo);
-      const downloadUrl = songInfo.sitePlayableFilePath;
+      const filename = makeFilename(audioInfo);
+      const downloadUrl = audioInfo.sitePlayableFilePath;
 
       if (!downloadUrl) {
         showStatus(t.errorNoLink, 'error');
@@ -163,7 +164,7 @@ document.addEventListener('DOMContentLoaded', function() {
         return;
       }
 
-      // Download file
+      // Download
       chrome.downloads.download({
         url: downloadUrl,
         filename: filename,
@@ -173,20 +174,41 @@ document.addEventListener('DOMContentLoaded', function() {
           showStatus(t.errorGeneral + chrome.runtime.lastError.message, 'error');
           setLoading(false);
         } else {
-          showStatus(t.statusSuccess + songInfo.songName, 'success');
+          showStatus(t.statusSuccess + audioInfo.songName, 'success');
           setLoading(false);
         }
       });
 
     } catch (error) {
-      console.error('Error:', error);
       const t = translations[currentLang];
       showStatus(t.errorGeneral + error.message, 'error');
       setLoading(false);
     }
   });
 
-  async function getCurrentPlayingSong() {
+  async function getAudioInfo(id, isSfx) {
+    return new Promise((resolve) => {
+      chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
+        if (!tabs[0]) {
+          resolve(null);
+          return;
+        }
+        
+        chrome.tabs.sendMessage(tabs[0].id, {
+          action: isSfx ? 'getSfxInfo' : 'getSongInfo',
+          [isSfx ? 'sfxId' : 'songId']: id
+        }, function(response) {
+          if (chrome.runtime.lastError || !response || !response.success) {
+            resolve(null);
+            return;
+          }
+          resolve(response.data);
+        });
+      });
+    });
+  }
+
+  async function getCurrentPlaying() {
     return new Promise((resolve) => {
       chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
         if (!tabs[0]) {
@@ -197,24 +219,17 @@ document.addEventListener('DOMContentLoaded', function() {
         chrome.tabs.sendMessage(tabs[0].id, {
           action: 'getCurrentSong'
         }, function(response) {
-          if (chrome.runtime.lastError) {
-            console.error('Content script error:', chrome.runtime.lastError);
+          if (chrome.runtime.lastError || !response || !response.success) {
             resolve(null);
             return;
           }
-          
-          if (response && response.success) {
-            resolve(response.data);
-          } else {
-            console.log('No currently playing song');
-            resolve(null);
-          }
+          resolve(response.data);
         });
       });
     });
   }
 
-  async function getAnySongFromPage() {
+  async function getAnyAudioFromPage() {
     return new Promise((resolve) => {
       chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
         if (!tabs[0]) {
@@ -225,71 +240,31 @@ document.addEventListener('DOMContentLoaded', function() {
         chrome.tabs.sendMessage(tabs[0].id, {
           action: 'getAnySong'
         }, function(response) {
-          if (chrome.runtime.lastError) {
-            console.error('Content script error:', chrome.runtime.lastError);
+          if (chrome.runtime.lastError || !response || !response.success) {
             resolve(null);
             return;
           }
-          
-          if (response && response.success) {
-            resolve(response.data);
-          } else {
-            resolve(null);
-          }
+          resolve(response.data);
         });
       });
     });
   }
 
-  function extractSongIdFromUrl(url) {
+  function extractIdFromUrl(url) {
     const parts = url.split('/');
     return parts[parts.length - 1].split('?')[0];
   }
 
-  async function getSongInfoViaContentScript(songId) {
-    return new Promise((resolve, reject) => {
-      chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
-        if (!tabs[0]) {
-          reject(new Error('Không tìm thấy tab. Vui lòng mở trang Artlist trước.'));
-          return;
-        }
-        
-        // Kiểm tra xem có phải trang Artlist không
-        if (!tabs[0].url || !tabs[0].url.includes('artlist.io')) {
-          reject(new Error('Vui lòng mở trang Artlist trước khi sử dụng extension!'));
-          return;
-        }
-        
-        chrome.tabs.sendMessage(tabs[0].id, {
-          action: 'getSongInfo',
-          songId: songId
-        }, function(response) {
-          if (chrome.runtime.lastError) {
-            console.error('Content script error:', chrome.runtime.lastError);
-            resolve(null);
-            return;
-          }
-          
-          if (response && response.success) {
-            resolve(response.data);
-          } else {
-            console.error('Content script returned error:', response?.error);
-            resolve(null);
-          }
-        });
-      });
-    });
-  }
-
-  function makeFilename(songData) {
-    // Simple format: Artist - Song.aac
-    const artist = sanitizeFilename(songData.artistName || 'Unknown');
-    const song = sanitizeFilename(songData.songName || 'Unknown');
-    return `${artist} - ${song}.aac`;
+  function makeFilename(audioData) {
+    const artist = sanitizeFilename(audioData.artistName || 'Artlist');
+    const name = sanitizeFilename(audioData.songName || 'Unknown');
+    const prefix = audioData.isSfx ? 'SFX' : 'Music';
+    
+    // Format: [SFX/Music] Artist - Name.aac
+    return `[${prefix}] ${artist} - ${name}.aac`;
   }
 
   function sanitizeFilename(name) {
-    // Remove invalid filename characters
     return name.replace(/[<>:"/\\|?*]/g, '').trim();
   }
 
