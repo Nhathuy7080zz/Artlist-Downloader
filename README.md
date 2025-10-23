@@ -33,18 +33,18 @@ Chromium-based browser (Edge, Brave, Opera...)
 
 ## 📖 Hướng dẫn sử dụng
 
-### Phương pháp 1: Tải bài đang phát (Khuyến nghị)
+### Phương pháp 1: Tải bài đang phát
 
 1. Truy cập [Artlist.io](https://artlist.io)
 2. Phát bài hát bạn muốn tải (Click vào tên bài đó để mở trang riêng của nó)
-3. Click vào icon extension trên toolbar
-4. Click nút **"🎧 Tải bài đang phát"**
+3. MởMở extension
+4. Click **"Tải xuống"**
 5. File sẽ được tải về
 
 ### Phương pháp 2: Tải từ link
 
 1. Truy cập trang bài hát trên Artlist (ví dụ: `https://artlist.io/royalty-free-music/song/abcxyz/123456`)
-2. Copy link nhạc bạn cần rồi paste vào
+2. Copy link nhạc bạn cần rồi paste vào extension
 3. Click **"Tải xuống"**
 4. File sẽ được tải về
 
@@ -87,7 +87,7 @@ Extension sử dụng các kỹ thuật sau:
 ### Không tìm thấy bài đang phát
 - Đảm bảo bài hát đang được phát (không pause)
 - Reload lại trang và phát lại bài hát
-- Thử sử dụng phương pháp "Tải từ link"
+- Thử tải bằng linklink
 
 ### File tải về bị lỗi
 - Kiểm tra kết nối internet
@@ -114,5 +114,6 @@ Mọi đóng góp đều được hoan nghênh! Vui lòng:
 
 Nếu có bất kỳ câu hỏi hoặc góp ý nào, vui lòng tạo issue trên GitHub.
 Readme wrote by Github Copilot (Claude Sonnet 4.5)
+
 
 
