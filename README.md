@@ -1,6 +1,6 @@
 # 🎵 Artlist Music Downloader
 
-Extension Chrome giúp tải nhạc từ Artlist.io một cách dễ dàng và nhanh chóng.
+Extension giúp tải nhạc từ Artlist.io một cách dễ dàng và nhanh chóng.
 
 ## ✨ Tính năng **(Chỉ có thể tải nhạc)**
 
@@ -13,7 +13,6 @@ Extension Chrome giúp tải nhạc từ Artlist.io một cách dễ dàng và n
 ## 📋 Yêu cầu
 
 - Google Chrome hoặc các trình duyệt Chromium-based (Edge, Brave, Opera...)
-- Tài khoản Artlist.io có quyền truy cập
 
 ## 🚀 Cài đặt
 
@@ -116,3 +115,4 @@ Mọi đóng góp đều được hoan nghênh! Vui lòng:
 ## 📧 Liên hệ
 
 Nếu có bất kỳ câu hỏi hoặc góp ý nào, vui lòng tạo issue trên GitHub.
+Readme wrote by Github Copilot (Claude Sonnet 4.5)
