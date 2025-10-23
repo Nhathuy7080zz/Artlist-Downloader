@@ -34,20 +34,20 @@
 
 ## 📖 Hướng dẫn sử dụng
 
+**Đăng nhập vào [Artlist.io](https://artlist.io) (bắt buộc).**
+
 ### Cách 1: Tải bài đang phát
 
-1.  Vào [Artlist.io](https://artlist.io).
-2.  Phát bất kỳ bài nhạc hoặc SFX nào.
-3.  Mở.
-4.  Click nút **"🎧 Tải xuống"**.
-5.  ✅ Xong\! File tự động tải về.
+1.  Phát bất kỳ bài nhạc hoặc SFX nào.
+2.  Mở.
+3.  Click **"🎧 Tải xuống"** -> File sẽ được tải về.
 
 ### Cách 2: Tải từ link (Tùy chọn)
 
 1.  Copy link của bài nhạc/SFX từ Artlist.
 2.  Click icon extension.
 3.  Paste link vào ô **"Link"**.
-4.  Click **"🎧 Tải xuống"**.
+4.  Click **"🎧 Tải xuống"** -> File sẽ được tải về.
 
 -----
 
