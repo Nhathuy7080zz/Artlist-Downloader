@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Artlist Downloader Pro",
-  "version": "3.0.0",
-  "description": "Download Music & Sound Effects from Artlist.io - Smart, Bilingual, Easy!",
+  "name": "Artlist Downloader",
+  "version": "2.0",
+  "description": "Download Music & Sound Effects from Artlist.io",
   "permissions": [
     "activeTab",
     "downloads",
