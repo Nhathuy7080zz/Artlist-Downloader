@@ -37,11 +37,11 @@ Extension Chrome giúp tải nhạc từ Artlist.io một cách dễ dàng và n
 
 ### Phương pháp 1: Tải bài đang phát (Khuyến nghị)
 
-1. Truy cập [Artlist.io](https://artlist.io) và đăng nhập
+1. Truy cập [Artlist.io](https://artlist.io)
 2. Phát bài hát bạn muốn tải
 3. Click vào icon extension trên toolbar
 4. Click nút **"🎧 Tải bài đang phát"**
-5. File sẽ được tải xuống thư mục Downloads
+5. File sẽ được tải vềvề
 
 ### Phương pháp 2: Tải từ link
 
@@ -83,9 +83,9 @@ Extension sử dụng các kỹ thuật sau:
 ## 🐛 Troubleshooting
 
 ### Extension không hoạt động
-- Đảm bảo bạn đã đăng nhập Artlist
 - Reload lại trang Artlist
 - Thử tắt và bật lại extension
+- Tải bản mới nhất
 
 ### Không tìm thấy bài đang phát
 - Đảm bảo bài hát đang được phát (không pause)
@@ -99,9 +99,9 @@ Extension sử dụng các kỹ thuật sau:
 ## 📝 Lưu ý
 - File tải về ở định dạng AAC
 - Chỉ sử dụng cho mục đích cá nhân và tuân thủ điều khoản sử dụng của Artlist
+- Mình không chịu trách nhiệm với bất kì vấn đề nào với bản quyền sử dụng nhạc khi bạn tải nhạc từ công cụ của mình!
 
 ## 📄 License
-
 Dự án này được tạo cho mục đích học tập và sử dụng cá nhân.
 
 ## 🤝 Đóng góp
@@ -116,13 +116,3 @@ Mọi đóng góp đều được hoan nghênh! Vui lòng:
 ## 📧 Liên hệ
 
 Nếu có bất kỳ câu hỏi hoặc góp ý nào, vui lòng tạo issue trên GitHub.
-
----
-
-**Made with ❤️ for Artlist users**
-
-
-
-
-
-
