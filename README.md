@@ -1,8 +1,4 @@
-# 🎵 Artlist Downloader v2.0# 🎵 Artlist Downloader# 🎵 Artlist Downloader v3 - Production Edition# 🎵 Artlist Music Downloader
-
-
-
-Extension Chrome giúp tải **nhạc** và **sound effects** từ Artlist.io một cách dễ dàng và nhanh chóng.
+## Tải **nhạc** và **sound effects** từ Artlist.io một cách dễ dàng và nhanh chóng.
 
 
 
