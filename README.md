@@ -1,5 +1,5 @@
 # Tải nhạc và sound effects từ Artlist.io một cách dễ dàng và nhanh chóng.
-Special Thanks to @xNasuni
+
 ## ✨ Tính năng
 
   - 🎧 **Tải nhạc & SFX**: Hỗ trợ cả Music và Sound Effects.
@@ -131,5 +131,6 @@ MIT License - Dự án này được tạo cho mục đích học tập và sử
 
 -----
 
-
+Special Thanks to @xNasuni
 **Enjoy\! 🎵**
+
