@@ -2,9 +2,9 @@
 // Supports: Music & Sound Effects
 
 const DEBUG = false; // Set to true to enable console logs
-const log = (...args) => DEBUG && console.log(...args);
-const warn = (...args) => DEBUG && console.warn(...args);
-const error = (...args) => DEBUG && console.error(...args);
+const log = (...args) => DEBUG && console.log('[Artlist DL]', ...args);
+const warn = (...args) => DEBUG && console.warn('[Artlist DL]', ...args);
+const error = (...args) => DEBUG && console.error('[Artlist DL]', ...args);
 
 // Storage
 const cachedSongsData = [];
@@ -638,9 +638,62 @@ monitorAudioPlayer();
           warn('Parse error:', e);
         }
       }
+      
+      // NEW: Intercept download URL requests
+      if (xhr._url && (
+          xhr._url.includes('download') || 
+          xhr._url.includes('/files/') ||
+          xhr._url.includes('cms-public-artifacts')
+      )) {
+        try {
+          log('🎯 Download URL intercepted:', xhr._url);
+          // Cache this URL for potential use
+          if (!window._artlistDownloadUrls) {
+            window._artlistDownloadUrls = [];
+          }
+          window._artlistDownloadUrls.push({
+            url: xhr._url,
+            timestamp: Date.now()
+          });
+          // Keep only last 10 URLs
+          if (window._artlistDownloadUrls.length > 10) {
+            window._artlistDownloadUrls.shift();
+          }
+        } catch (e) {
+          warn('Download URL cache error:', e);
+        }
+      }
     });
     
     return oldXHRSend.apply(this, arguments);
+  };
+})();
+
+// NEW: Intercept fetch API as well
+(function() {
+  const originalFetch = window.fetch;
+  window.fetch = function(...args) {
+    const url = args[0];
+    
+    if (typeof url === 'string' && (
+        url.includes('download') || 
+        url.includes('/files/') ||
+        url.includes('cms-public-artifacts')
+    )) {
+      log('🎯 Fetch download URL intercepted:', url);
+      if (!window._artlistDownloadUrls) {
+        window._artlistDownloadUrls = [];
+      }
+      window._artlistDownloadUrls.push({
+        url: url,
+        timestamp: Date.now()
+      });
+      if (window._artlistDownloadUrls.length > 10) {
+        window._artlistDownloadUrls.shift();
+      }
+    }
+    
+    return originalFetch.apply(this, args);
   };
 })();
 
@@ -654,6 +707,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     const cached = isSfx ? findSfxInCache(id) : findSongInCache(id);
     if (cached) {
       const normalized = isSfx ? normalizeSfxData(cached) : normalizeSongData(cached);
+      
+      // If no download URL in cached data, try to get from intercepted URLs
+      if (!normalized.sitePlayableFilePath || normalized.sitePlayableFilePath.includes('playable')) {
+        const recentDownloadUrl = getRecentDownloadUrl(id);
+        if (recentDownloadUrl) {
+          normalized.sitePlayableFilePath = recentDownloadUrl;
+          log('✅ Using intercepted download URL');
+        }
+      }
+      
       sendResponse({ success: true, data: normalized });
       return true;
     }
@@ -663,6 +726,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     fetchFunc(id)
       .then(apiData => {
         if (apiData && apiData.sitePlayableFilePath) {
+          // Check if it's a preview URL, try to get better one
+          if (apiData.sitePlayableFilePath.includes('playable')) {
+            const recentDownloadUrl = getRecentDownloadUrl(id);
+            if (recentDownloadUrl) {
+              apiData.sitePlayableFilePath = recentDownloadUrl;
+              log('✅ Replaced preview URL with intercepted download URL');
+            }
+          }
           sendResponse({ success: true, data: apiData });
           return;
         }
@@ -735,6 +806,31 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 });
 
+// NEW: Helper to get recent download URL from intercepted requests
+function getRecentDownloadUrl(audioId) {
+  if (!window._artlistDownloadUrls || window._artlistDownloadUrls.length === 0) {
+    return null;
+  }
+  
+  // Get most recent URL that matches the audio ID
+  const now = Date.now();
+  const recentUrls = window._artlistDownloadUrls.filter(item => {
+    // Only use URLs from last 60 seconds
+    return (now - item.timestamp) < 60000;
+  });
+  
+  if (recentUrls.length === 0) return null;
+  
+  // Try to find URL that contains the audio ID
+  const matchingUrl = recentUrls.find(item => item.url.includes(audioId));
+  if (matchingUrl) {
+    return matchingUrl.url;
+  }
+  
+  // Otherwise return most recent URL
+  return recentUrls[recentUrls.length - 1].url;
+}
+
 // Helper functions
 function findSongInCache(songId) {
   const songIdNum = parseInt(songId);
@@ -765,6 +861,43 @@ function findSfxInCache(sfxId) {
 }
 
 function normalizeSongData(song) {
+  // Try to get high quality download URL
+  let downloadUrl = null;
+  
+  // Priority 1: waveform downloadFileUrl
+  if (song.waveform?.downloadFileUrl) {
+    downloadUrl = song.waveform.downloadFileUrl;
+  }
+  
+  // Priority 2: files array - FILTER AUDIO ONLY
+  if (!downloadUrl && song.files && song.files.length > 0) {
+    // Filter audio files only
+    const audioFiles = song.files.filter(f => {
+      const format = (f.fileFormat || '').toUpperCase();
+      const filename = (f.fileName || '').toLowerCase();
+      const isAudio = ['WAV', 'AAC', 'MP3', 'FLAC', 'OGG', 'M4A'].includes(format) ||
+                     filename.endsWith('.wav') || filename.endsWith('.aac') || 
+                     filename.endsWith('.mp3') || filename.endsWith('.flac');
+      const isVideo = ['MP4', 'MOV', 'AVI', 'WEBM'].includes(format) ||
+                     filename.endsWith('.mp4') || filename.endsWith('.mov');
+      return isAudio && !isVideo;
+    });
+    
+    const wavFile = audioFiles.find(f => f.fileFormat === 'WAV' || f.fileFormat === 'wav');
+    const aacFile = audioFiles.find(f => f.fileFormat === 'AAC' || f.fileFormat === 'aac');
+    const mp3File = audioFiles.find(f => f.fileFormat === 'MP3' || f.fileFormat === 'mp3');
+    
+    const preferredFile = wavFile || aacFile || mp3File || audioFiles[0];
+    if (preferredFile?.downloadFilePath) {
+      downloadUrl = preferredFile.downloadFilePath;
+    }
+  }
+  
+  // Priority 3: Fallback to playable URL
+  if (!downloadUrl) {
+    downloadUrl = song.waveform?.playableFileUrl || song.sitePlayableFilePath;
+  }
+  
   return {
     songId: song.id || song.songId || '',
     songName: song.title || song.songName || 'Unknown',
@@ -772,12 +905,49 @@ function normalizeSongData(song) {
     artistName: song.artist?.name || song.artistName || 'Unknown Artist',
     albumId: song.album?.id || song.albumId || '',
     albumName: song.album?.title || song.albumName || song.title || song.songName || 'Unknown Album',
-    sitePlayableFilePath: song.waveform?.playableFileUrl || song.sitePlayableFilePath || null,
+    sitePlayableFilePath: downloadUrl,
     isSfx: false
   };
 }
 
 function normalizeSfxData(sfx) {
+  // Try to get high quality download URL
+  let downloadUrl = null;
+  
+  // Priority 1: waveform downloadFileUrl
+  if (sfx.waveform?.downloadFileUrl) {
+    downloadUrl = sfx.waveform.downloadFileUrl;
+  }
+  
+  // Priority 2: files array - FILTER AUDIO ONLY
+  if (!downloadUrl && sfx.files && sfx.files.length > 0) {
+    // Filter audio files only
+    const audioFiles = sfx.files.filter(f => {
+      const format = (f.fileFormat || '').toUpperCase();
+      const filename = (f.fileName || '').toLowerCase();
+      const isAudio = ['WAV', 'AAC', 'MP3', 'FLAC', 'OGG', 'M4A'].includes(format) ||
+                     filename.endsWith('.wav') || filename.endsWith('.aac') || 
+                     filename.endsWith('.mp3') || filename.endsWith('.flac');
+      const isVideo = ['MP4', 'MOV', 'AVI', 'WEBM'].includes(format) ||
+                     filename.endsWith('.mp4') || filename.endsWith('.mov');
+      return isAudio && !isVideo;
+    });
+    
+    const wavFile = audioFiles.find(f => f.fileFormat === 'WAV' || f.fileFormat === 'wav');
+    const aacFile = audioFiles.find(f => f.fileFormat === 'AAC' || f.fileFormat === 'aac');
+    const mp3File = audioFiles.find(f => f.fileFormat === 'MP3' || f.fileFormat === 'mp3');
+    
+    const preferredFile = wavFile || aacFile || mp3File || audioFiles[0];
+    if (preferredFile?.downloadFilePath) {
+      downloadUrl = preferredFile.downloadFilePath;
+    }
+  }
+  
+  // Priority 3: Fallback to playable URL
+  if (!downloadUrl) {
+    downloadUrl = sfx.waveform?.playableFileUrl || sfx.sitePlayableFilePath;
+  }
+  
   return {
     songId: sfx.id || sfx.sfxId || '',
     songName: sfx.title || sfx.sfxName || 'Unknown',
@@ -785,7 +955,7 @@ function normalizeSfxData(sfx) {
     artistName: 'Artlist',
     albumId: '',
     albumName: sfx.title || sfx.sfxName || 'Unknown',
-    sitePlayableFilePath: sfx.waveform?.playableFileUrl || sfx.sitePlayableFilePath || null,
+    sitePlayableFilePath: downloadUrl,
     isSfx: true
   };
 }
@@ -803,6 +973,15 @@ async function fetchSongFromPageContext(songId) {
         assetTypeId
         duration
         sitePlayableFilePath
+        files {
+          fileFormat
+          fileName
+          downloadFilePath
+        }
+        waveform {
+          playableFileUrl
+          downloadFileUrl
+        }
       }
     }`;
 
@@ -820,7 +999,60 @@ async function fetchSongFromPageContext(songId) {
     const data = await response.json();
     if (data.errors) return null;
     
-    return data.data?.songs?.[0] || null;
+    const song = data.data?.songs?.[0];
+    if (!song) return null;
+    
+    // Try to get high quality download URL
+    let downloadUrl = null;
+    
+    // Priority 1: waveform downloadFileUrl (usually high quality)
+    if (song.waveform?.downloadFileUrl) {
+      downloadUrl = song.waveform.downloadFileUrl;
+      log('✅ Song - Using waveform.downloadFileUrl:', downloadUrl);
+    }
+    
+    // Priority 2: files array - look for WAV or high quality format
+    if (!downloadUrl && song.files && song.files.length > 0) {
+      log('📦 Available files:', song.files.map(f => `${f.fileFormat} - ${f.fileName}`));
+      
+      // IMPORTANT: Filter AUDIO files only (exclude video)
+      const audioFiles = song.files.filter(f => {
+        const format = (f.fileFormat || '').toUpperCase();
+        const filename = (f.fileName || '').toLowerCase();
+        // Only include audio formats, exclude video
+        const isAudio = ['WAV', 'AAC', 'MP3', 'FLAC', 'OGG', 'M4A'].includes(format) ||
+                       filename.endsWith('.wav') || filename.endsWith('.aac') || 
+                       filename.endsWith('.mp3') || filename.endsWith('.flac');
+        const isVideo = ['MP4', 'MOV', 'AVI', 'WEBM'].includes(format) ||
+                       filename.endsWith('.mp4') || filename.endsWith('.mov');
+        return isAudio && !isVideo;
+      });
+      
+      log('🎵 Audio files only:', audioFiles.map(f => f.fileFormat));
+      
+      const wavFile = audioFiles.find(f => f.fileFormat === 'WAV' || f.fileFormat === 'wav');
+      const aacFile = audioFiles.find(f => f.fileFormat === 'AAC' || f.fileFormat === 'aac');
+      const mp3File = audioFiles.find(f => f.fileFormat === 'MP3' || f.fileFormat === 'mp3');
+      
+      const preferredFile = wavFile || aacFile || mp3File || audioFiles[0];
+      if (preferredFile?.downloadFilePath) {
+        downloadUrl = preferredFile.downloadFilePath;
+        log('✅ Song - Using files.downloadFilePath:', preferredFile.fileFormat, downloadUrl);
+      }
+    }
+    
+    // Priority 3: Fallback to playable file (preview quality)
+    if (!downloadUrl) {
+      downloadUrl = song.waveform?.playableFileUrl || song.sitePlayableFilePath;
+      log('⚠️ Song - Using fallback playableFileUrl (preview quality):', downloadUrl);
+    }
+    
+    log('🎵 FINAL SONG DOWNLOAD URL:', downloadUrl);
+    
+    return {
+      ...song,
+      sitePlayableFilePath: downloadUrl
+    };
   } catch (err) {
     error('API error:', err);
     return null;
@@ -835,6 +1067,15 @@ async function fetchSfxFromPageContext(sfxId) {
         sfxName
         duration
         sitePlayableFilePath
+        files {
+          fileFormat
+          fileName
+          downloadFilePath
+        }
+        waveform {
+          playableFileUrl
+          downloadFileUrl
+        }
       }
     }`;
 
@@ -853,20 +1094,65 @@ async function fetchSfxFromPageContext(sfxId) {
     if (data.errors) return null;
     
     const sfx = data.data?.sfxs?.[0];
-    if (sfx) {
-      return {
-        songId: sfx.sfxId,
-        songName: sfx.sfxName,
-        artistId: '',
-        artistName: 'Artlist',
-        albumId: '',
-        albumName: sfx.sfxName,
-        sitePlayableFilePath: sfx.sitePlayableFilePath,
-        isSfx: true
-      };
+    if (!sfx) return null;
+    
+    // Try to get high quality download URL
+    let downloadUrl = null;
+    
+    // Priority 1: waveform downloadFileUrl
+    if (sfx.waveform?.downloadFileUrl) {
+      downloadUrl = sfx.waveform.downloadFileUrl;
+      log('✅ SFX - Using waveform.downloadFileUrl:', downloadUrl);
     }
     
-    return null;
+    // Priority 2: files array - look for WAV or high quality format
+    if (!downloadUrl && sfx.files && sfx.files.length > 0) {
+      log('📦 Available SFX files:', sfx.files.map(f => `${f.fileFormat} - ${f.fileName}`));
+      
+      // IMPORTANT: Filter AUDIO files only (exclude video)
+      const audioFiles = sfx.files.filter(f => {
+        const format = (f.fileFormat || '').toUpperCase();
+        const filename = (f.fileName || '').toLowerCase();
+        // Only include audio formats, exclude video
+        const isAudio = ['WAV', 'AAC', 'MP3', 'FLAC', 'OGG', 'M4A'].includes(format) ||
+                       filename.endsWith('.wav') || filename.endsWith('.aac') || 
+                       filename.endsWith('.mp3') || filename.endsWith('.flac');
+        const isVideo = ['MP4', 'MOV', 'AVI', 'WEBM'].includes(format) ||
+                       filename.endsWith('.mp4') || filename.endsWith('.mov');
+        return isAudio && !isVideo;
+      });
+      
+      log('🎵 SFX Audio files only:', audioFiles.map(f => f.fileFormat));
+      
+      const wavFile = audioFiles.find(f => f.fileFormat === 'WAV' || f.fileFormat === 'wav');
+      const aacFile = audioFiles.find(f => f.fileFormat === 'AAC' || f.fileFormat === 'aac');
+      const mp3File = audioFiles.find(f => f.fileFormat === 'MP3' || f.fileFormat === 'mp3');
+      
+      const preferredFile = wavFile || aacFile || mp3File || audioFiles[0];
+      if (preferredFile?.downloadFilePath) {
+        downloadUrl = preferredFile.downloadFilePath;
+        log('✅ SFX - Using files.downloadFilePath:', preferredFile.fileFormat, downloadUrl);
+      }
+    }
+    
+    // Priority 3: Fallback to playable file (preview quality)
+    if (!downloadUrl) {
+      downloadUrl = sfx.waveform?.playableFileUrl || sfx.sitePlayableFilePath;
+      log('⚠️ SFX - Using fallback playableFileUrl (preview quality):', downloadUrl);
+    }
+    
+    log('🔊 FINAL SFX DOWNLOAD URL:', downloadUrl);
+    
+    return {
+      songId: sfx.sfxId,
+      songName: sfx.sfxName,
+      artistId: '',
+      artistName: 'Artlist',
+      albumId: '',
+      albumName: sfx.sfxName,
+      sitePlayableFilePath: downloadUrl,
+      isSfx: true
+    };
   } catch (err) {
     error('API error:', err);
     return null;
