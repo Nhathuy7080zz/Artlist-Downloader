@@ -1067,10 +1067,13 @@ async function fetchSfxFromPageContext(sfxId) {
         sfxName
         duration
         sitePlayableFilePath
+        siteDownloadableFilePath
+        downloadFilePath
         files {
           fileFormat
           fileName
           downloadFilePath
+          filePath
         }
         waveform {
           playableFileUrl
@@ -1078,6 +1081,8 @@ async function fetchSfxFromPageContext(sfxId) {
         }
       }
     }`;
+
+    log('🔍 Fetching SFX data for ID:', sfxId);
 
     const response = await fetch('https://search-api.artlist.io/v1/graphql', {
       method: 'POST',
@@ -1088,19 +1093,43 @@ async function fetchSfxFromPageContext(sfxId) {
       })
     });
 
-    if (!response.ok) return null;
+    if (!response.ok) {
+      log('❌ SFX API response not OK:', response.status);
+      return null;
+    }
     
     const data = await response.json();
-    if (data.errors) return null;
+    if (data.errors) {
+      log('❌ SFX API errors:', data.errors);
+      return null;
+    }
     
     const sfx = data.data?.sfxs?.[0];
-    if (!sfx) return null;
+    if (!sfx) {
+      log('❌ No SFX data found');
+      return null;
+    }
+    
+    log('📦 RAW SFX DATA:', JSON.stringify(sfx, null, 2));
+    
+    log('📦 RAW SFX DATA:', JSON.stringify(sfx, null, 2));
     
     // Try to get high quality download URL
     let downloadUrl = null;
     
+    // Priority 0: Direct download fields (SFX specific)
+    if (sfx.siteDownloadableFilePath) {
+      downloadUrl = sfx.siteDownloadableFilePath;
+      log('✅ SFX - Using siteDownloadableFilePath:', downloadUrl);
+    }
+    
+    if (!downloadUrl && sfx.downloadFilePath) {
+      downloadUrl = sfx.downloadFilePath;
+      log('✅ SFX - Using downloadFilePath:', downloadUrl);
+    }
+    
     // Priority 1: waveform downloadFileUrl
-    if (sfx.waveform?.downloadFileUrl) {
+    if (!downloadUrl && sfx.waveform?.downloadFileUrl) {
       downloadUrl = sfx.waveform.downloadFileUrl;
       log('✅ SFX - Using waveform.downloadFileUrl:', downloadUrl);
     }
@@ -1129,9 +1158,12 @@ async function fetchSfxFromPageContext(sfxId) {
       const mp3File = audioFiles.find(f => f.fileFormat === 'MP3' || f.fileFormat === 'mp3');
       
       const preferredFile = wavFile || aacFile || mp3File || audioFiles[0];
-      if (preferredFile?.downloadFilePath) {
-        downloadUrl = preferredFile.downloadFilePath;
-        log('✅ SFX - Using files.downloadFilePath:', preferredFile.fileFormat, downloadUrl);
+      if (preferredFile) {
+        // Try downloadFilePath first, then filePath
+        downloadUrl = preferredFile.downloadFilePath || preferredFile.filePath;
+        if (downloadUrl) {
+          log('✅ SFX - Using files.downloadFilePath:', preferredFile.fileFormat, downloadUrl);
+        }
       }
     }
     
