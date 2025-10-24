@@ -125,12 +125,10 @@ Mọi đóng góp đều được hoan nghênh\! Vui lòng:
 4.  Push to branch (`git push origin feature/YourIdea`).
 5.  Mở Pull Request.
 
-## 📄 License
-
-MIT License - Dự án này được tạo cho mục đích học tập và sử dụng cá nhân.
-
 -----
 
 Special Thanks to @xNasuni
+
 **Enjoy\! 🎵**
+
 
