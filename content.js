@@ -1,7 +1,7 @@
 // Content script - Artlist Downloader v3 (Production)
 // Supports: Music & Sound Effects
 
-const DEBUG = false; // Set to true to enable console logs
+const DEBUG = true; // Set to true to enable console logs
 const log = (...args) => DEBUG && console.log('[Artlist DL]', ...args);
 const warn = (...args) => DEBUG && console.warn('[Artlist DL]', ...args);
 const error = (...args) => DEBUG && console.error('[Artlist DL]', ...args);
@@ -10,6 +10,7 @@ const error = (...args) => DEBUG && console.error('[Artlist DL]', ...args);
 const cachedSongsData = [];
 const cachedSfxData = [];
 let currentPlayingSong = null;
+let lastPlayedSong = null; // NEW: Track last played song (even if stopped)
 let isDetecting = false;
 let lastDetectionTime = 0;
 
@@ -37,16 +38,18 @@ function detectCurrentSong() {
     }
     
     let audioUrl = '';
+    
+    // PRIORITY: Try all methods to find audio element
     let audioElement = document.querySelector('audio');
     
-    // Try multiple ways to find audio element
+    // Method 1: Direct audio element
     if (!audioElement) {
-      // Try finding in shadow DOM or iframe
+      // Try in shadow DOM
       const allElements = document.querySelectorAll('*');
       for (const el of allElements) {
         if (el.shadowRoot) {
           const shadowAudio = el.shadowRoot.querySelector('audio');
-          if (shadowAudio) {
+          if (shadowAudio && shadowAudio.src) {
             audioElement = shadowAudio;
             log('🎵 Found audio in shadow DOM');
             break;
@@ -55,26 +58,50 @@ function detectCurrentSong() {
       }
     }
     
-    if (audioElement) {
+    // Method 2: Look in player containers
+    if (!audioElement) {
+      const playerContainers = [
+        '[data-testid="MusicPlayer"]',
+        '[data-testid="AudioPlayer"]',
+        'footer',
+        '[class*="player" i]',
+        '[class*="Player"]'
+      ];
+      
+      for (const selector of playerContainers) {
+        const container = document.querySelector(selector);
+        if (container) {
+          audioElement = container.querySelector('audio');
+          if (audioElement && audioElement.src) {
+            log('🎵 Found audio in', selector);
+            break;
+          }
+        }
+      }
+    }
+    
+    if (audioElement && (audioElement.src || audioElement.currentSrc)) {
       audioUrl = audioElement.currentSrc || audioElement.src || '';
       log('🎵 Audio element found!');
-      log('🎵 Audio URL:', audioUrl ? audioUrl.substring(0, 80) + '...' : 'EMPTY');
+      log('🎵 Audio URL:', audioUrl ? audioUrl.substring(0, 100) + '...' : 'EMPTY');
       log('🎵 Audio paused:', audioElement.paused);
       log('🎵 Audio currentTime:', audioElement.currentTime);
+      log('🎵 Audio duration:', audioElement.duration);
     } else {
-      log('❌ No audio element found anywhere!');
+      log('❌ No audio element found, trying performance API...');
       log('🔍 Trying performance API to find audio file...');
       
-      // Fallback: Try to find audio URL from performance/network resources
+      // Fallback: Try to find audio URL from performance/network resources - ONLY FROM ARTLIST
       if (window.performance) {
         const resources = performance.getEntriesByType('resource');
-        const audioResources = resources.filter(r => 
-          r.name.includes('.aac') || 
-          r.name.includes('.m4a') || 
-          r.name.includes('.mp3') ||
-          r.name.includes('.wav') ||
-          r.name.includes('cms-public-artifacts')
-        );
+        const audioResources = resources.filter(r => {
+          const url = r.name || '';
+          // MUST be from Artlist domains AND be audio file
+          const isArtlistDomain = url.includes('artlist.io') || url.includes('cms-public-artifacts');
+          const isAudioFile = url.includes('.aac') || url.includes('.m4a') || 
+                             url.includes('.mp3') || url.includes('.wav');
+          return isArtlistDomain && isAudioFile;
+        });
         
         if (audioResources.length > 0) {
           // Get the most recent one
@@ -99,13 +126,41 @@ function detectCurrentSong() {
       log('🔄 New audio detected, updating...');
     }
     
-    currentPlayingSong = {
+    // SMART MERGE: Preserve instant detection data when possible
+    const updatedData = {
       ...songInfo,
       sitePlayableFilePath: audioUrl,
       detectedAt: Date.now()
     };
     
-    log('💾 Current playing saved:', currentPlayingSong);
+    // CRITICAL: If currentPlayingSong has a specific name but songInfo doesn't, keep the old one
+    if (currentPlayingSong && currentPlayingSong.songId === songInfo.songId) {
+      // Keep existing name if it's better than new detection
+      const hasGoodExistingName = currentPlayingSong.songName && 
+                                  currentPlayingSong.songName !== 'Unknown' &&
+                                  currentPlayingSong.songName !== 'SFX Audio' &&
+                                  currentPlayingSong.songName !== 'Unknown Audio';
+      
+      const hasGenericNewName = !songInfo.songName || 
+                               songInfo.songName === 'Unknown' ||
+                               songInfo.songName === 'SFX Audio' ||
+                               songInfo.songName === 'Unknown Audio';
+      
+      if (hasGoodExistingName && hasGenericNewName) {
+        log('📝 PRESERVING existing good name:', currentPlayingSong.songName);
+        updatedData.songName = currentPlayingSong.songName;
+        updatedData.albumName = currentPlayingSong.albumName || songInfo.songName;
+        updatedData.artistName = currentPlayingSong.artistName || songInfo.artistName;
+      }
+    }
+    
+    currentPlayingSong = updatedData;
+    
+    // IMPORTANT: Also save to lastPlayedSong (persists even after audio stops)
+    lastPlayedSong = { ...currentPlayingSong };
+    
+    log('💾 Current playing saved:', currentPlayingSong.songName);
+    log('💾 Last played saved:', lastPlayedSong.songName);
   } catch (err) {
     error('Error detecting:', err);
   } finally {
@@ -122,8 +177,22 @@ function monitorAudioPlayer() {
     if (isMonitoring) return;
     isMonitoring = true;
     
-    audio.addEventListener('play', () => setTimeout(() => detectCurrentSong(), 500));
-    audio.addEventListener('loadeddata', () => setTimeout(() => detectCurrentSong(), 500));
+    // CRITICAL: Detect multiple times on play for short SFX
+    audio.addEventListener('play', () => {
+      setTimeout(() => detectCurrentSong(), 50);   // Immediate
+      setTimeout(() => detectCurrentSong(), 200);  // Quick
+      setTimeout(() => detectCurrentSong(), 500);  // Normal
+    });
+    
+    audio.addEventListener('loadeddata', () => {
+      setTimeout(() => detectCurrentSong(), 100);
+      setTimeout(() => detectCurrentSong(), 500);
+    });
+    
+    audio.addEventListener('canplay', () => {
+      setTimeout(() => detectCurrentSong(), 100);
+      setTimeout(() => detectCurrentSong(), 400);
+    });
     
     let lastCheck = 0;
     audio.addEventListener('timeupdate', function() {
@@ -147,6 +216,7 @@ function monitorAudioPlayer() {
   };
   
   let lastAudioSrc = '';
+  let lastClearedTime = 0;
   
   const checkAudio = () => {
     const audio = document.querySelector('audio');
@@ -159,6 +229,24 @@ function monitorAudioPlayer() {
           log('🔄 Audio source changed, resetting detection...');
           currentPlayingSong = null; // Clear old data
           lastAudioSrc = currentSrc;
+          
+          // CRITICAL: Clear old captured URLs EVERY time audio changes
+          // This prevents downloading wrong song/SFX when switching tracks
+          const now = Date.now();
+          log('🗑️ Clearing old captured URLs for new audio');
+          if (window._artlistDownloadUrls) {
+            // Keep only very recent URLs (last 5 seconds)
+            const before = window._artlistDownloadUrls.length;
+            window._artlistDownloadUrls = window._artlistDownloadUrls.filter(item => {
+              const age = (now - item.timestamp) / 1000;
+              return age < 5;
+            });
+            const after = window._artlistDownloadUrls.length;
+            if (before !== after) {
+              log(`   Cleared ${before - after} old URLs, kept ${after} recent ones`);
+            }
+          }
+          lastClearedTime = now;
         }
         
         audioElement = audio;
@@ -208,7 +296,6 @@ function extractSongInfoFromUI() {
     if (playerBar) {
       const allLinks = playerBar.querySelectorAll('a[href*="/song/"], a[href*="/sfx/"]');
       const songLink = allLinks[0];
-      const artistLink = playerBar.querySelector('a[href*="/artist/"]');
       
       if (songLink) {
         songName = songLink.textContent?.trim() || songLink.innerText?.trim() || '';
@@ -221,11 +308,31 @@ function extractSongInfoFromUI() {
         }
       }
       
-      if (artistLink) {
-        artistName = artistLink.textContent?.trim() || artistLink.innerText?.trim() || '';
+      // Get artist - try multiple methods
+      if (!isSfx) {
+        // Method 1: Direct artist link in player bar
+        const artistLink = playerBar.querySelector('a[href*="/artist/"]');
+        if (artistLink) {
+          artistName = artistLink.textContent?.trim() || artistLink.innerText?.trim() || '';
+        }
+        
+        // Method 2: Look for text between song name and other elements
+        if (!artistName && songLink) {
+          // Try to find sibling text or parent text
+          const parent = songLink.closest('div, span, a');
+          if (parent) {
+            const textContent = parent.textContent || '';
+            // Artist name usually appears after " - " or "by "
+            const byMatch = textContent.match(/(?:by|By)\s+([^-•|]+)/);
+            if (byMatch) {
+              artistName = byMatch[1].trim();
+            }
+          }
+        }
       }
       
       if (songName) {
+        log('📝 Detected from player bar:', { songName, artistName, songId, isSfx });
         return {
           songId: songId || 'unknown',
           songName: songName,
@@ -258,10 +365,13 @@ function extractSongInfoFromUI() {
       foundAudioUrl = audioElement.src || audioElement.currentSrc || '';
     } else if (window.performance) {
       const resources = performance.getEntriesByType('resource');
-      const audioResources = resources.filter(r => 
-        (r.name.includes('.aac') || r.name.includes('.m4a') || r.name.includes('.mp3')) &&
-        r.name.includes('cms-public-artifacts')
-      );
+      const audioResources = resources.filter(r => {
+        const url = r.name || '';
+        // MUST be from Artlist domains AND be audio file
+        const isArtlistDomain = url.includes('artlist.io') || url.includes('cms-public-artifacts');
+        const isAudioFile = url.includes('.aac') || url.includes('.m4a') || url.includes('.mp3');
+        return isArtlistDomain && isAudioFile;
+      });
       if (audioResources.length > 0) {
         foundAudioUrl = audioResources[audioResources.length - 1].name;
         log('🎯 Using audio URL from performance API');
@@ -601,6 +711,118 @@ function extractSongInfoFromUI() {
 // Start monitoring
 monitorAudioPlayer();
 
+// Monitor play button clicks (for quick detection - especially for short SFX)
+document.addEventListener('click', function(e) {
+  // Check if clicked element is a play button
+  const target = e.target;
+  const button = target.closest('button');
+  
+  if (button) {
+    const isPlayButton = button.querySelector('svg[data-icon="play"]') ||
+                        button.querySelector('[class*="play" i]') ||
+                        button.getAttribute('aria-label')?.toLowerCase().includes('play') ||
+                        button.getAttribute('title')?.toLowerCase().includes('play');
+    
+    if (isPlayButton) {
+      log('▶️ Play button clicked, detecting song immediately...');
+      
+      // IMMEDIATE: Try to get song info from the clicked row (for short SFX)
+      try {
+        // Try multiple methods to find the row/container
+        let container = button.closest('tr') || 
+                       button.closest('div[role="row"]') || 
+                       button.closest('div[class*="row" i]') ||
+                       button.closest('div[class*="Row"]') ||
+                       button.closest('div[class*="item" i]') ||
+                       button.closest('div[class*="Item"]') ||
+                       button.closest('li');
+        
+        // If still not found, try parent elements
+        if (!container) {
+          let el = button;
+          for (let i = 0; i < 10 && el; i++) { // Search up to 10 levels
+            el = el.parentElement;
+            if (el && el.querySelector('a[href*="/sfx/"], a[href*="/track/"], a[href*="/song/"]')) {
+              container = el;
+              break;
+            }
+          }
+        }
+        
+        if (container) {
+          log('📦 Found container for play button');
+          
+          // Try to find song/SFX link
+          const songLink = container.querySelector('a[href*="/song/"]') || 
+                          container.querySelector('a[href*="/sfx/"]') ||
+                          container.querySelector('a[href*="/track/"]');
+          
+          if (songLink) {
+            const songName = songLink.textContent?.trim() || songLink.innerText?.trim() || '';
+            const href = songLink.getAttribute('href') || '';
+            const parts = href.split('/');
+            const songId = parts[parts.length - 1].split('?')[0];
+            const isSfx = href.includes('/sfx/') || href.includes('/track/') || 
+                         window.location.pathname.includes('/sfx');
+            
+            // Also try to get artist name
+            let artistName = isSfx ? 'Artlist' : 'Unknown Artist';
+            const artistLink = container.querySelector('a[href*="/artist/"]');
+            if (artistLink) {
+              artistName = artistLink.textContent?.trim() || artistLink.innerText?.trim() || artistName;
+            }
+            
+            if (songName && songId) {
+              log('⚡ INSTANT detection from clicked container:');
+              log('   Name:', songName);
+              log('   ID:', songId);
+              log('   Artist:', artistName);
+              
+              // Save immediately
+              const instantData = {
+                songId: songId,
+                songName: songName,
+                artistId: '',
+                artistName: artistName,
+                albumId: '',
+                albumName: songName,
+                isSfx: isSfx,
+                sitePlayableFilePath: '', // Will be updated by normal detection
+                detectedAt: Date.now()
+              };
+              
+              currentPlayingSong = instantData;
+              lastPlayedSong = { ...instantData };
+              
+              log('💾 Instant save complete');
+            } else {
+              log('⚠️ Found link but missing name or ID');
+            }
+          } else {
+            log('⚠️ No song/SFX link found in container');
+          }
+        } else {
+          log('⚠️ Could not find container for play button');
+        }
+      } catch (err) {
+        warn('Instant detection failed:', err);
+      }
+      
+      // Still do normal detection to get audio URL
+      setTimeout(() => {
+        detectCurrentSong();
+      }, 100); // Reduced from 300ms
+      
+      // Also detect again after audio might have loaded
+      setTimeout(() => {
+        detectCurrentSong();
+      }, 800); // Reduced from 1000ms
+    }
+  }
+}, true); // Use capture phase to catch early
+
+log('🎯 Play button click monitor installed');
+
 // XHR Interceptor
 (function() {
   const oldXHROpen = window.XMLHttpRequest.prototype.open;
@@ -639,63 +861,118 @@ monitorAudioPlayer();
         }
       }
       
-      // NEW: Intercept download URL requests
+      // CRITICAL: Intercept ONLY real media URLs (not API endpoints)
       if (xhr._url && (
-          xhr._url.includes('download') || 
-          xhr._url.includes('/files/') ||
-          xhr._url.includes('cms-public-artifacts')
+          (xhr._url.includes('cms-public-artifacts') && 
+           (xhr._url.includes('.aac') || xhr._url.includes('.wav') || 
+            xhr._url.includes('.mp3') || xhr._url.includes('.m4a'))) ||
+          (xhr._url.includes('/files/') && 
+           (xhr._url.includes('.aac') || xhr._url.includes('.wav') || 
+            xhr._url.includes('.mp3') || xhr._url.includes('.m4a')))
       )) {
-        try {
-          log('🎯 Download URL intercepted:', xhr._url);
-          // Cache this URL for potential use
+        // Double check: not graphql or json
+        if (!xhr._url.includes('graphql') && !xhr._url.includes('.json')) {
+          log('🎯 XHR Media URL intercepted:', xhr._url.substring(0, 120) + '...');
           if (!window._artlistDownloadUrls) {
             window._artlistDownloadUrls = [];
           }
           window._artlistDownloadUrls.push({
             url: xhr._url,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            method: 'XHR'
           });
-          // Keep only last 10 URLs
-          if (window._artlistDownloadUrls.length > 10) {
+          // Keep last 30 URLs
+          if (window._artlistDownloadUrls.length > 30) {
             window._artlistDownloadUrls.shift();
           }
-        } catch (e) {
-          warn('Download URL cache error:', e);
         }
       }
     });
     
     return oldXHRSend.apply(this, arguments);
   };
+  
+  log('🔧 XHR interceptor installed');
 })();
 
-// NEW: Intercept fetch API as well
+// Fetch API Interceptor
 (function() {
   const originalFetch = window.fetch;
   window.fetch = function(...args) {
     const url = args[0];
     
+    // CRITICAL: Intercept ONLY real media URLs (not API endpoints)
     if (typeof url === 'string' && (
-        url.includes('download') || 
-        url.includes('/files/') ||
-        url.includes('cms-public-artifacts')
+        (url.includes('cms-public-artifacts') && 
+         (url.includes('.aac') || url.includes('.wav') || 
+          url.includes('.mp3') || url.includes('.m4a'))) ||
+        (url.includes('/files/') && 
+         (url.includes('.aac') || url.includes('.wav') || 
+          url.includes('.mp3') || url.includes('.m4a')))
     )) {
-      log('🎯 Fetch download URL intercepted:', url);
-      if (!window._artlistDownloadUrls) {
-        window._artlistDownloadUrls = [];
-      }
-      window._artlistDownloadUrls.push({
-        url: url,
-        timestamp: Date.now()
-      });
-      if (window._artlistDownloadUrls.length > 10) {
-        window._artlistDownloadUrls.shift();
+      // Double check: not graphql or json
+      if (!url.includes('graphql') && !url.includes('.json')) {
+        log('🎯 Fetch Media URL intercepted:', url.substring(0, 120) + '...');
+        if (!window._artlistDownloadUrls) {
+          window._artlistDownloadUrls = [];
+        }
+        window._artlistDownloadUrls.push({
+          url: url,
+          timestamp: Date.now(),
+          method: 'Fetch'
+        });
+        if (window._artlistDownloadUrls.length > 30) {
+          window._artlistDownloadUrls.shift();
+        }
       }
     }
     
     return originalFetch.apply(this, args);
   };
+  
+  log('🔧 Fetch interceptor installed');
 })();
+
+// Performance Observer to catch audio URLs loaded via other methods
+(function() {
+  try {
+    const observer = new PerformanceObserver((list) => {
+      for (const entry of list.getEntries()) {
+        const url = entry.name;
+        if (url && (
+            url.includes('cms-public-artifacts') ||
+            (url.includes('.aac') || url.includes('.wav') || 
+             url.includes('.mp3') || url.includes('.m4a'))
+        )) {
+          log('📊 Performance API captured audio URL:', url.substring(0, 120) + '...');
+          if (!window._artlistDownloadUrls) {
+            window._artlistDownloadUrls = [];
+          }
+          
+          // Check if already captured
+          const exists = window._artlistDownloadUrls.some(item => item.url === url);
+          if (!exists) {
+            window._artlistDownloadUrls.push({
+              url: url,
+              timestamp: Date.now(),
+              method: 'Performance'
+            });
+            if (window._artlistDownloadUrls.length > 20) {
+              window._artlistDownloadUrls.shift();
+            }
+          }
+        }
+      }
+    });
+    
+    observer.observe({ entryTypes: ['resource'] });
+    log('🔧 Performance Observer installed');
+  } catch (e) {
+    warn('Failed to install Performance Observer:', e);
+  }
+})();
+
+// Message handlers
 
 // Message handlers
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -757,36 +1034,31 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
   
   if (request.action === 'getCurrentSong') {
-    detectCurrentSong();
-    
-    if (currentPlayingSong && currentPlayingSong.songName) {
-      if (currentPlayingSong.songId && !currentPlayingSong.sitePlayableFilePath) {
-        const fetchFunc = currentPlayingSong.isSfx ? fetchSfxFromPageContext : fetchSongFromPageContext;
-        fetchFunc(currentPlayingSong.songId)
-          .then(apiData => {
-            if (apiData && apiData.sitePlayableFilePath) {
-              const enriched = { ...currentPlayingSong, ...apiData };
-              sendResponse({ success: true, data: enriched });
-            } else {
-              sendResponse({ success: true, data: currentPlayingSong });
-            }
-          })
-          .catch(() => {
-            sendResponse({ success: true, data: currentPlayingSong });
-          });
-        
-        return true;
-      }
+    // CRITICAL: Give instant detection time to complete before responding
+    // Small delay ensures instant save completes before we read the data
+    setTimeout(() => {
+      // Force detection update (but don't wait for slow parts)
+      detectCurrentSong();
       
-      sendResponse({ success: true, data: currentPlayingSong });
-    } else {
-      sendResponse({ 
-        success: false, 
-        error: 'No audio playing. Please play something first!' 
-      });
-    }
+      // PRIORITY 1: Use currentPlayingSong if available
+      // PRIORITY 2: Use lastPlayedSong (even if audio stopped - for short SFX)
+      const songToUse = currentPlayingSong || lastPlayedSong;
+      
+      if (songToUse && songToUse.songName) {
+        log('🎵 Responding with:', songToUse.songName, 
+            '(source:', currentPlayingSong ? 'currently playing' : 'last played', ')');
+        
+        // Return immediately what we have - popup will handle URL fetching if needed
+        sendResponse({ success: true, data: songToUse });
+      } else {
+        sendResponse({ 
+          success: false, 
+          error: 'No audio playing. Please play something first!' 
+        });
+      }
+    }, 200); // 200ms delay - balance between speed and accuracy
     
-    return true;
+    return true; // Keep channel open for async response
   }
   
   if (request.action === 'getAnySong') {
@@ -808,11 +1080,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 // NEW: Helper to get recent download URL from intercepted requests
 function getRecentDownloadUrl(audioId) {
+  // FOR SONGS: Use timing-based matching with safety checks
+  // Songs don't have strict ID matching requirements but still need timing validation
   if (!window._artlistDownloadUrls || window._artlistDownloadUrls.length === 0) {
     return null;
   }
   
-  // Get most recent URL that matches the audio ID
   const now = Date.now();
   const recentUrls = window._artlistDownloadUrls.filter(item => {
     // Only use URLs from last 60 seconds
@@ -821,14 +1094,25 @@ function getRecentDownloadUrl(audioId) {
   
   if (recentUrls.length === 0) return null;
   
-  // Try to find URL that contains the audio ID
+  // PRIORITY 1: Try to find URL that contains the audio ID
   const matchingUrl = recentUrls.find(item => item.url.includes(audioId));
   if (matchingUrl) {
+    log('✅ Found exact matching URL for song ID:', audioId);
     return matchingUrl.url;
   }
   
-  // Otherwise return most recent URL
-  return recentUrls[recentUrls.length - 1].url;
+  // PRIORITY 2: For songs, allow fallback BUT only if very recent (< 10s)
+  // This prevents downloading wrong song when switching between songs
+  const mostRecent = recentUrls[recentUrls.length - 1];
+  const ageSeconds = (now - mostRecent.timestamp) / 1000;
+  
+  if (ageSeconds < 10) {
+    log(`📍 Using most recent URL for song (${ageSeconds.toFixed(1)}s old):`, mostRecent.url.substring(0, 100) + '...');
+    return mostRecent.url;
+  } else {
+    log(`⚠️ Most recent URL too old (${ageSeconds.toFixed(1)}s), not using it`);
+    return null;
+  }
 }
 
 // Helper functions
@@ -893,9 +1177,23 @@ function normalizeSongData(song) {
     }
   }
   
-  // Priority 3: Fallback to playable URL
+  // Priority 3: Fallback to playable URL - ONLY IF VALID
   if (!downloadUrl) {
-    downloadUrl = song.waveform?.playableFileUrl || song.sitePlayableFilePath;
+    const fallbackUrl = song.waveform?.playableFileUrl || song.sitePlayableFilePath;
+    if (fallbackUrl && (
+        fallbackUrl.includes('.aac') || 
+        fallbackUrl.includes('.wav') || 
+        fallbackUrl.includes('.mp3') ||
+        fallbackUrl.includes('.m4a') ||
+        fallbackUrl.includes('cms-public-artifacts')
+    )) {
+      downloadUrl = fallbackUrl;
+    }
+  }
+  
+  // Validate URL
+  if (downloadUrl && (downloadUrl.includes('graphql') || downloadUrl.includes('.json'))) {
+    downloadUrl = null;
   }
   
   return {
@@ -943,9 +1241,23 @@ function normalizeSfxData(sfx) {
     }
   }
   
-  // Priority 3: Fallback to playable URL
+  // Priority 3: Fallback to playable URL - ONLY IF VALID
   if (!downloadUrl) {
-    downloadUrl = sfx.waveform?.playableFileUrl || sfx.sitePlayableFilePath;
+    const fallbackUrl = sfx.waveform?.playableFileUrl || sfx.sitePlayableFilePath;
+    if (fallbackUrl && (
+        fallbackUrl.includes('.aac') || 
+        fallbackUrl.includes('.wav') || 
+        fallbackUrl.includes('.mp3') ||
+        fallbackUrl.includes('.m4a') ||
+        fallbackUrl.includes('cms-public-artifacts')
+    )) {
+      downloadUrl = fallbackUrl;
+    }
+  }
+  
+  // Validate URL
+  if (downloadUrl && (downloadUrl.includes('graphql') || downloadUrl.includes('.json'))) {
+    downloadUrl = null;
   }
   
   return {
@@ -962,6 +1274,8 @@ function normalizeSfxData(sfx) {
 
 async function fetchSongFromPageContext(songId) {
   try {
+    log('🌐 Fetching song from API...');
+    
     const query = `query Songs($ids: [String!]!) {
       songs(ids: $ids) {
         songId
@@ -973,15 +1287,6 @@ async function fetchSongFromPageContext(songId) {
         assetTypeId
         duration
         sitePlayableFilePath
-        files {
-          fileFormat
-          fileName
-          downloadFilePath
-        }
-        waveform {
-          playableFileUrl
-          downloadFileUrl
-        }
       }
     }`;
 
@@ -994,65 +1299,31 @@ async function fetchSongFromPageContext(songId) {
       })
     });
 
-    if (!response.ok) return null;
+    if (!response.ok) {
+      log('❌ API response not OK:', response.status);
+      return null;
+    }
     
     const data = await response.json();
-    if (data.errors) return null;
+    if (data.errors) {
+      log('❌ GraphQL errors:', data.errors);
+      return null;
+    }
     
     const song = data.data?.songs?.[0];
-    if (!song) return null;
-    
-    // Try to get high quality download URL
-    let downloadUrl = null;
-    
-    // Priority 1: waveform downloadFileUrl (usually high quality)
-    if (song.waveform?.downloadFileUrl) {
-      downloadUrl = song.waveform.downloadFileUrl;
-      log('✅ Song - Using waveform.downloadFileUrl:', downloadUrl);
+    if (!song) {
+      log('❌ No song data in response');
+      return null;
     }
     
-    // Priority 2: files array - look for WAV or high quality format
-    if (!downloadUrl && song.files && song.files.length > 0) {
-      log('📦 Available files:', song.files.map(f => `${f.fileFormat} - ${f.fileName}`));
-      
-      // IMPORTANT: Filter AUDIO files only (exclude video)
-      const audioFiles = song.files.filter(f => {
-        const format = (f.fileFormat || '').toUpperCase();
-        const filename = (f.fileName || '').toLowerCase();
-        // Only include audio formats, exclude video
-        const isAudio = ['WAV', 'AAC', 'MP3', 'FLAC', 'OGG', 'M4A'].includes(format) ||
-                       filename.endsWith('.wav') || filename.endsWith('.aac') || 
-                       filename.endsWith('.mp3') || filename.endsWith('.flac');
-        const isVideo = ['MP4', 'MOV', 'AVI', 'WEBM'].includes(format) ||
-                       filename.endsWith('.mp4') || filename.endsWith('.mov');
-        return isAudio && !isVideo;
-      });
-      
-      log('🎵 Audio files only:', audioFiles.map(f => f.fileFormat));
-      
-      const wavFile = audioFiles.find(f => f.fileFormat === 'WAV' || f.fileFormat === 'wav');
-      const aacFile = audioFiles.find(f => f.fileFormat === 'AAC' || f.fileFormat === 'aac');
-      const mp3File = audioFiles.find(f => f.fileFormat === 'MP3' || f.fileFormat === 'mp3');
-      
-      const preferredFile = wavFile || aacFile || mp3File || audioFiles[0];
-      if (preferredFile?.downloadFilePath) {
-        downloadUrl = preferredFile.downloadFilePath;
-        log('✅ Song - Using files.downloadFilePath:', preferredFile.fileFormat, downloadUrl);
-      }
-    }
+    log('📦 Song API Response:', {
+      songId: song.songId,
+      songName: song.songName,
+      artistName: song.artistName,
+      sitePlayableFilePath: song.sitePlayableFilePath
+    });
     
-    // Priority 3: Fallback to playable file (preview quality)
-    if (!downloadUrl) {
-      downloadUrl = song.waveform?.playableFileUrl || song.sitePlayableFilePath;
-      log('⚠️ Song - Using fallback playableFileUrl (preview quality):', downloadUrl);
-    }
-    
-    log('🎵 FINAL SONG DOWNLOAD URL:', downloadUrl);
-    
-    return {
-      ...song,
-      sitePlayableFilePath: downloadUrl
-    };
+    return song;
   } catch (err) {
     error('API error:', err);
     return null;
@@ -1061,35 +1332,69 @@ async function fetchSongFromPageContext(songId) {
 
 async function fetchSfxFromPageContext(sfxId) {
   try {
-    const query = `query Sfxs($ids: [String!]!) {
+    log('🌐 Fetching SFX, ID:', sfxId);
+    
+    // Get detection timestamp from current/last played song
+    const songData = currentPlayingSong || lastPlayedSong;
+    const detectedAt = songData?.detectedAt;
+    
+    // PRIORITY 1: Check captured URLs from network (BEST quality)
+    const capturedUrl = getMostRecentCapturedUrl(sfxId, detectedAt);
+    if (capturedUrl) {
+      log('✅ Using captured URL from network:', capturedUrl.substring(0, 80) + '...');
+      
+      const uiInfo = extractSongInfoFromUI();
+      
+      return {
+        songId: sfxId,
+        songName: uiInfo?.songName || 'SFX Audio',
+        artistId: '',
+        artistName: uiInfo?.artistName || 'Artlist',
+        albumId: '',
+        albumName: uiInfo?.songName || 'SFX',
+        sitePlayableFilePath: capturedUrl,
+        isSfx: true
+      };
+    }
+    
+    // PRIORITY 2: For SFX, try to get URL from currently playing audio
+    const playingUrl = await tryGetPlayingAudioUrl();
+    if (playingUrl) {
+      log('✅ Got SFX URL from playing audio:', playingUrl);
+      
+      // Get name from UI
+      const uiInfo = extractSongInfoFromUI();
+      
+      return {
+        songId: sfxId,
+        songName: uiInfo?.songName || 'SFX Audio',
+        artistId: '',
+        artistName: uiInfo?.artistName || 'Artlist',
+        albumId: '',
+        albumName: uiInfo?.songName || 'SFX',
+        sitePlayableFilePath: playingUrl,
+        isSfx: true
+      };
+    }
+    
+    // Fallback: Try API (but this usually returns preview URL for SFX)
+    log('⚠️ No playing audio found, trying API (may be preview quality)...');
+    
+    const query = `query Sfxs($ids: [Int!]!) {
       sfxs(ids: $ids) {
         sfxId
         sfxName
         duration
         sitePlayableFilePath
-        siteDownloadableFilePath
-        downloadFilePath
-        files {
-          fileFormat
-          fileName
-          downloadFilePath
-          filePath
-        }
-        waveform {
-          playableFileUrl
-          downloadFileUrl
-        }
       }
     }`;
-
-    log('🔍 Fetching SFX data for ID:', sfxId);
 
     const response = await fetch('https://search-api.artlist.io/v1/graphql', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         query: query,
-        variables: { ids: [sfxId.toString()] }
+        variables: { ids: [parseInt(sfxId)] }
       })
     });
 
@@ -1099,81 +1404,19 @@ async function fetchSfxFromPageContext(sfxId) {
     }
     
     const data = await response.json();
+    
     if (data.errors) {
-      log('❌ SFX API errors:', data.errors);
+      log('❌ SFX GraphQL errors:', data.errors);
       return null;
     }
     
     const sfx = data.data?.sfxs?.[0];
     if (!sfx) {
-      log('❌ No SFX data found');
+      log('❌ No SFX data in response');
       return null;
     }
     
-    log('📦 RAW SFX DATA:', JSON.stringify(sfx, null, 2));
-    
-    log('📦 RAW SFX DATA:', JSON.stringify(sfx, null, 2));
-    
-    // Try to get high quality download URL
-    let downloadUrl = null;
-    
-    // Priority 0: Direct download fields (SFX specific)
-    if (sfx.siteDownloadableFilePath) {
-      downloadUrl = sfx.siteDownloadableFilePath;
-      log('✅ SFX - Using siteDownloadableFilePath:', downloadUrl);
-    }
-    
-    if (!downloadUrl && sfx.downloadFilePath) {
-      downloadUrl = sfx.downloadFilePath;
-      log('✅ SFX - Using downloadFilePath:', downloadUrl);
-    }
-    
-    // Priority 1: waveform downloadFileUrl
-    if (!downloadUrl && sfx.waveform?.downloadFileUrl) {
-      downloadUrl = sfx.waveform.downloadFileUrl;
-      log('✅ SFX - Using waveform.downloadFileUrl:', downloadUrl);
-    }
-    
-    // Priority 2: files array - look for WAV or high quality format
-    if (!downloadUrl && sfx.files && sfx.files.length > 0) {
-      log('📦 Available SFX files:', sfx.files.map(f => `${f.fileFormat} - ${f.fileName}`));
-      
-      // IMPORTANT: Filter AUDIO files only (exclude video)
-      const audioFiles = sfx.files.filter(f => {
-        const format = (f.fileFormat || '').toUpperCase();
-        const filename = (f.fileName || '').toLowerCase();
-        // Only include audio formats, exclude video
-        const isAudio = ['WAV', 'AAC', 'MP3', 'FLAC', 'OGG', 'M4A'].includes(format) ||
-                       filename.endsWith('.wav') || filename.endsWith('.aac') || 
-                       filename.endsWith('.mp3') || filename.endsWith('.flac');
-        const isVideo = ['MP4', 'MOV', 'AVI', 'WEBM'].includes(format) ||
-                       filename.endsWith('.mp4') || filename.endsWith('.mov');
-        return isAudio && !isVideo;
-      });
-      
-      log('🎵 SFX Audio files only:', audioFiles.map(f => f.fileFormat));
-      
-      const wavFile = audioFiles.find(f => f.fileFormat === 'WAV' || f.fileFormat === 'wav');
-      const aacFile = audioFiles.find(f => f.fileFormat === 'AAC' || f.fileFormat === 'aac');
-      const mp3File = audioFiles.find(f => f.fileFormat === 'MP3' || f.fileFormat === 'mp3');
-      
-      const preferredFile = wavFile || aacFile || mp3File || audioFiles[0];
-      if (preferredFile) {
-        // Try downloadFilePath first, then filePath
-        downloadUrl = preferredFile.downloadFilePath || preferredFile.filePath;
-        if (downloadUrl) {
-          log('✅ SFX - Using files.downloadFilePath:', preferredFile.fileFormat, downloadUrl);
-        }
-      }
-    }
-    
-    // Priority 3: Fallback to playable file (preview quality)
-    if (!downloadUrl) {
-      downloadUrl = sfx.waveform?.playableFileUrl || sfx.sitePlayableFilePath;
-      log('⚠️ SFX - Using fallback playableFileUrl (preview quality):', downloadUrl);
-    }
-    
-    log('🔊 FINAL SFX DOWNLOAD URL:', downloadUrl);
+    log('⚠️ Using API URL (preview quality):', sfx.sitePlayableFilePath);
     
     return {
       songId: sfx.sfxId,
@@ -1182,11 +1425,266 @@ async function fetchSfxFromPageContext(sfxId) {
       artistName: 'Artlist',
       albumId: '',
       albumName: sfx.sfxName,
-      sitePlayableFilePath: downloadUrl,
+      sitePlayableFilePath: sfx.sitePlayableFilePath,
       isSfx: true
     };
   } catch (err) {
-    error('API error:', err);
+    error('❌ SFX fetch error:', err);
+    return null;
+  }
+}
+
+// Helper: Get most recent captured URL for an audio ID
+function getMostRecentCapturedUrl(audioId, detectedAt) {
+  log('🔍 Searching for captured URL, audioId:', audioId, 'detectedAt:', detectedAt);
+  
+  // FIRST: Scan Performance API for any missed URLs
+  scanPerformanceAPIForAudioUrls();
+  
+  if (!window._artlistDownloadUrls) {
+    log('❌ No _artlistDownloadUrls array found');
+    return null;
+  }
+  
+  if (window._artlistDownloadUrls.length === 0) {
+    log('❌ _artlistDownloadUrls is empty');
+    return null;
+  }
+  
+  log(`📦 Total captured URLs: ${window._artlistDownloadUrls.length}`);
+  window._artlistDownloadUrls.forEach((item, i) => {
+    log(`  [${i}] ${item.url.substring(0, 100)}... (${item.method}, ${Math.floor((Date.now() - item.timestamp) / 1000)}s ago)`);
+  });
+  
+  const now = Date.now();
+  const recentUrls = window._artlistDownloadUrls.filter(item => {
+    // Only use URLs from last 60 seconds
+    const age = (now - item.timestamp) / 1000;
+    const isRecent = age < 60;
+    
+    // CRITICAL: If we have detectedAt timestamp, only use URLs captured AFTER detection
+    // This prevents using URLs from previous audio
+    if (detectedAt && item.timestamp < detectedAt) {
+      log(`⏰ Skipping URL captured before detection (${item.timestamp} < ${detectedAt})`);
+      return false;
+    }
+    
+    if (!isRecent) {
+      log(`⏰ Skipping old URL (${age.toFixed(0)}s old)`);
+    }
+    return isRecent;
+  });
+  
+  if (recentUrls.length === 0) {
+    log('❌ No recent URLs found (all older than 60s or before detection)');
+    return null;
+  }
+  
+  log(`✅ Found ${recentUrls.length} recent URLs after detection`);
+  
+  // IMPORTANT: Filter out invalid URLs (graphql, json, etc)
+  const validAudioUrls = recentUrls.filter(item => {
+    const url = item.url;
+    const isValid = !url.includes('graphql') && 
+                   !url.includes('.json') && 
+                   !url.includes('/api/') &&
+                   (url.includes('.aac') || url.includes('.wav') || 
+                    url.includes('.mp3') || url.includes('.m4a') ||
+                    url.includes('cms-public-artifacts'));
+    
+    if (!isValid) {
+      log(`🚫 Skipping invalid URL: ${url.substring(0, 80)}...`);
+    }
+    return isValid;
+  });
+  
+  if (validAudioUrls.length === 0) {
+    log('❌ No valid audio URLs found after filtering');
+    return null;
+  }
+  
+  log(`✅ Found ${validAudioUrls.length} valid audio URLs`);
+  
+  // Try to find URL that contains the audio ID
+  const idStr = audioId.toString();
+  log(`🔎 Looking for URL containing ID: "${idStr}"`);
+  
+  const matchingUrl = validAudioUrls.find(item => item.url.includes(idStr));
+  if (matchingUrl) {
+    log('🎯 Found matching URL for ID:', idStr);
+    return matchingUrl.url;
+  }
+  
+  // If no ID match but we have detectedAt, use MOST RECENT after detection
+  // (Artlist URLs don't contain ID, so we rely on timing)
+  if (detectedAt && validAudioUrls.length > 0) {
+    const mostRecent = validAudioUrls[validAudioUrls.length - 1];
+    log('📍 No ID in URL, using most recent URL captured after detection:', mostRecent.url.substring(0, 100) + '...');
+    return mostRecent.url;
+  }
+  
+  // CRITICAL: DO NOT fallback to most recent URL without timing check
+  log(`❌ No URL contains ID "${idStr}" and no detectedAt timestamp, returning null`);
+  return null;
+}
+
+// Helper: Scan Performance API for audio URLs
+function scanPerformanceAPIForAudioUrls() {
+  try {
+    const resources = performance.getEntriesByType('resource');
+    const audioResources = resources.filter(r => {
+      const url = r.name || '';
+      return (url.includes('cms-public-artifacts') && 
+              (url.includes('.aac') || url.includes('.wav') || 
+               url.includes('.mp3') || url.includes('.m4a')));
+    });
+    
+    if (audioResources.length > 0) {
+      log(`🔎 Found ${audioResources.length} audio URLs in Performance API`);
+      
+      if (!window._artlistDownloadUrls) {
+        window._artlistDownloadUrls = [];
+      }
+      
+      audioResources.forEach(resource => {
+        const url = resource.name;
+        // Only add if not already in array
+        const exists = window._artlistDownloadUrls.some(item => item.url === url);
+        if (!exists) {
+          log('📊 Adding from Performance API:', url.substring(0, 100) + '...');
+          window._artlistDownloadUrls.push({
+            url: url,
+            timestamp: Date.now(),
+            method: 'PerformanceAPI'
+          });
+        }
+      });
+      
+      // Keep last 30 URLs (increased from 20)
+      if (window._artlistDownloadUrls.length > 30) {
+        window._artlistDownloadUrls = window._artlistDownloadUrls.slice(-30);
+      }
+    }
+  } catch (e) {
+    warn('Error scanning Performance API:', e);
+  }
+}
+
+// Helper: Try to get URL from currently playing audio
+async function tryGetPlayingAudioUrl() {
+  try {
+    log('🔍 Trying to get playing audio URL...');
+    
+    // Method 1: Audio element - search everywhere including shadow DOM
+    let audioElements = document.querySelectorAll('audio');
+    
+    // Also search in shadow DOMs
+    const allElements = document.querySelectorAll('*');
+    for (const el of allElements) {
+      if (el.shadowRoot) {
+        const shadowAudios = el.shadowRoot.querySelectorAll('audio');
+        audioElements = [...audioElements, ...shadowAudios];
+      }
+    }
+    
+    // Also search in iframes
+    const iframes = document.querySelectorAll('iframe');
+    for (const iframe of iframes) {
+      try {
+        const iframeAudios = iframe.contentDocument?.querySelectorAll('audio') || [];
+        audioElements = [...audioElements, ...iframeAudios];
+      } catch (e) {
+        // Cross-origin iframe, skip
+      }
+    }
+    
+    log(`Found ${audioElements.length} audio elements (including shadow DOM and iframes)`);
+    
+    for (const audio of audioElements) {
+      const isPlaying = !audio.paused && audio.currentTime > 0;
+      const srcUrl = audio.src || audio.currentSrc;
+      
+      log(`Audio element - playing: ${isPlaying}, paused: ${audio.paused}, currentTime: ${audio.currentTime}, src: ${srcUrl}`);
+      
+      if (srcUrl) {
+        // Accept ANY non-blob URL from audio element
+        if (!srcUrl.startsWith('blob:') && !srcUrl.startsWith('data:')) {
+          log('✅ Found audio URL from audio element:', srcUrl);
+          return srcUrl;
+        } else {
+          log('⚠️ Audio has blob/data URL:', srcUrl);
+        }
+      }
+      
+      // Check all source elements inside audio
+      const sources = audio.querySelectorAll('source');
+      for (const source of sources) {
+        const sourceSrc = source.src || source.getAttribute('src');
+        if (sourceSrc && !sourceSrc.startsWith('blob:')) {
+          log('✅ Found URL from source element:', sourceSrc);
+          return sourceSrc;
+        }
+      }
+    }
+    
+    // Method 2: Check XHR intercepted URLs (PRIORITY for recent requests)
+    log('🔍 Checking cached URLs...');
+    if (window._artlistDownloadUrls && window._artlistDownloadUrls.length > 0) {
+      log(`Found ${window._artlistDownloadUrls.length} cached URLs`);
+      
+      // Show all cached URLs for debugging
+      window._artlistDownloadUrls.forEach((item, i) => {
+        log(`  [${i}] ${new Date(item.timestamp).toLocaleTimeString()}: ${item.url}`);
+      });
+      
+      // Get the most recent audio URL (within last 2 minutes)
+      const recentUrls = window._artlistDownloadUrls
+        .filter(item => Date.now() - item.timestamp < 120000)
+        .sort((a, b) => b.timestamp - a.timestamp);
+      
+      if (recentUrls.length > 0) {
+        const url = recentUrls[0].url;
+        log('✅ Using most recent cached URL:', url);
+        return url;
+      }
+    }
+    
+    // Method 3: Performance API - VERY aggressive search
+    log('🔍 Trying performance API with aggressive search...');
+    const resources = performance.getEntriesByType('resource');
+    
+    // Look for ANY Artlist CDN URLs
+    const cdnResources = resources.filter(r => {
+      const name = r.name.toLowerCase();
+      const isCdn = name.includes('cms-public-artifacts.artlist.io');
+      const notExcluded = !name.includes('.js') &&
+                         !name.includes('.css') &&
+                         !name.includes('.json') &&
+                         !name.includes('.svg') &&
+                         !name.includes('.png') &&
+                         !name.includes('.jpg') &&
+                         !name.includes('.webp') &&
+                         !name.includes('.woff') &&
+                         !name.includes('.ttf');
+      
+      return isCdn && notExcluded;
+    }).sort((a, b) => b.startTime - a.startTime);
+    
+    log(`Found ${cdnResources.length} CDN resources`);
+    
+    if (cdnResources.length > 0) {
+      log('🔍 All CDN resources found:');
+      cdnResources.forEach((r, i) => log(`  [${i}]`, r.name));
+      
+      const url = cdnResources[0].name;
+      log('✅ Using most recent CDN resource:', url);
+      return url;
+    }
+    
+    log('❌ No audio URL found from any method');
+    return null;
+  } catch (err) {
+    error('Error getting playing audio URL:', err);
     return null;
   }
 }
@@ -1250,12 +1748,14 @@ async function scrapeSongDataFromPage() {
     
     if (!audioUrl && window.performance) {
       const resources = performance.getEntriesByType('resource');
-      const audioResources = resources.filter(r => 
-        r.name.includes('.aac') || 
-        r.name.includes('.m4a') || 
-        r.name.includes('.wav') ||
-        r.name.includes('cms-public-artifacts')
-      );
+      const audioResources = resources.filter(r => {
+        const url = r.name || '';
+        // MUST be from Artlist domains AND be audio file
+        const isArtlistDomain = url.includes('artlist.io') || url.includes('cms-public-artifacts');
+        const isAudioFile = url.includes('.aac') || url.includes('.m4a') || 
+                           url.includes('.wav') || url.includes('.mp3');
+        return isArtlistDomain && isAudioFile;
+      });
       
       if (audioResources.length > 0) {
         audioUrl = audioResources[audioResources.length - 1].name;

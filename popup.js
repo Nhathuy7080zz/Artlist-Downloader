@@ -96,88 +96,18 @@ document.addEventListener('DOMContentLoaded', function() {
         return;
       }
 
-      let audioInfo = null;
       const inputUrl = urlInput.value.trim();
-      const isSfx = currentUrl.includes('/sound-effects/') || currentUrl.includes('/sfx/') ||
-                     inputUrl.includes('/sound-effects/') || inputUrl.includes('/sfx/');
-
-      // Strategy 0: User provided URL
-      if (inputUrl && inputUrl.includes('artlist.io')) {
-        if (inputUrl.includes('/song/')) {
-          const songId = extractIdFromUrl(inputUrl);
-          audioInfo = await getAudioInfo(songId, false);
-        } else if (inputUrl.includes('/sfx/')) {
-          const sfxId = extractIdFromUrl(inputUrl);
-          audioInfo = await getAudioInfo(sfxId, true);
-        }
+      
+      // Detect page type: SFX or Music
+      const isSfxPage = currentUrl.startsWith('https://artlist.io/sfx') || 
+                        (inputUrl && inputUrl.startsWith('https://artlist.io/sfx'));
+      
+      // Route to appropriate download handler
+      if (isSfxPage) {
+        await downloadSfx(currentUrl, inputUrl);
+      } else {
+        await downloadMusic(currentUrl, inputUrl);
       }
-
-      // Strategy 1: Current page
-      if (!audioInfo) {
-        if (currentUrl.includes('/song/')) {
-          const songId = extractIdFromUrl(currentUrl);
-          audioInfo = await getAudioInfo(songId, false);
-        } else if (currentUrl.includes('/sfx/')) {
-          const sfxId = extractIdFromUrl(currentUrl);
-          audioInfo = await getAudioInfo(sfxId, true);
-        }
-      }
-
-      // Strategy 2: Currently playing
-      if (!audioInfo || !audioInfo.sitePlayableFilePath) {
-        audioInfo = await getCurrentPlaying();
-      }
-
-      // Strategy 3: Scrape from page
-      if (!audioInfo || !audioInfo.sitePlayableFilePath) {
-        audioInfo = await getAnyAudioFromPage();
-      }
-
-      if (!audioInfo) {
-        showStatus(t.errorNoSong, 'error');
-        setLoading(false);
-        return;
-      }
-
-      // If missing download link, fetch it
-      if (!audioInfo.sitePlayableFilePath && audioInfo.songId) {
-        showStatus(t.statusGettingLink, 'info');
-        const fullInfo = await getAudioInfo(audioInfo.songId, audioInfo.isSfx || false);
-        
-        if (fullInfo && fullInfo.sitePlayableFilePath) {
-          audioInfo = { ...audioInfo, ...fullInfo };
-        } else {
-          showStatus(t.errorNoLink, 'error');
-          setLoading(false);
-          return;
-        }
-      }
-
-      showStatus(t.statusDownloading, 'info');
-
-      const filename = makeFilename(audioInfo);
-      const downloadUrl = audioInfo.sitePlayableFilePath;
-
-      if (!downloadUrl) {
-        showStatus(t.errorNoLink, 'error');
-        setLoading(false);
-        return;
-      }
-
-      // Download
-      chrome.downloads.download({
-        url: downloadUrl,
-        filename: filename,
-        saveAs: false
-      }, function(downloadId) {
-        if (chrome.runtime.lastError) {
-          showStatus(t.errorGeneral + chrome.runtime.lastError.message, 'error');
-          setLoading(false);
-        } else {
-          showStatus(t.statusSuccess + audioInfo.songName, 'success');
-          setLoading(false);
-        }
-      });
 
     } catch (error) {
       const t = translations[currentLang];
@@ -185,6 +115,194 @@ document.addEventListener('DOMContentLoaded', function() {
       setLoading(false);
     }
   });
+
+  // Download Music (working version)
+  async function downloadMusic(currentUrl, inputUrl) {
+    const t = translations[currentLang];
+    let audioInfo = null;
+
+    // Simple approach like SFX: Get current/last played first
+    audioInfo = await getCurrentPlaying();
+    
+    console.log('[Popup] Music Info:', audioInfo);
+
+    // Strategy fallbacks only if no info at all
+    if (!audioInfo) {
+      // User provided specific Song URL
+      if (inputUrl && inputUrl.includes('/song/')) {
+        const songId = extractIdFromUrl(inputUrl);
+        if (songId) {
+          audioInfo = await getAudioInfo(songId, false);
+        }
+      }
+      
+      // Current page is specific Song
+      if (!audioInfo && currentUrl.includes('/song/')) {
+        const songId = extractIdFromUrl(currentUrl);
+        if (songId) {
+          audioInfo = await getAudioInfo(songId, false);
+        }
+      }
+      
+      // Last resort: scrape
+      if (!audioInfo) {
+        audioInfo = await getAnyAudioFromPage();
+      }
+    }
+
+    if (!audioInfo) {
+      showStatus(t.errorNoSong, 'error');
+      setLoading(false);
+      return;
+    }
+
+    // CRITICAL: If we have name but no URL, fetch URL using the ID
+    if (audioInfo.songName && !audioInfo.sitePlayableFilePath && audioInfo.songId) {
+      console.log('[Popup] Have name but no URL, fetching URL for ID:', audioInfo.songId);
+      showStatus(t.statusGettingLink, 'info');
+      const urlData = await getAudioInfo(audioInfo.songId, audioInfo.isSfx);
+      if (urlData && urlData.sitePlayableFilePath) {
+        // Merge: keep the good name, add the URL
+        audioInfo.sitePlayableFilePath = urlData.sitePlayableFilePath;
+        console.log('[Popup] ✅ Fetched URL:', urlData.sitePlayableFilePath);
+      }
+    }
+
+    // If still no URL, wait and retry once
+    if (!audioInfo.sitePlayableFilePath) {
+      showStatus('Đợi audio load...', 'info');
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      const retry = await getCurrentPlaying();
+      if (retry && retry.sitePlayableFilePath) {
+        audioInfo = retry;
+      }
+    }
+
+    // Final URL check
+    if (!audioInfo.sitePlayableFilePath) {
+      showStatus('Không có URL download. Hãy play nhạc trước!', 'error');
+      setLoading(false);
+      return;
+    }
+
+    console.log('[Popup] Downloading:', audioInfo.songName || 'Unknown');
+    showStatus(t.statusDownloading, 'info');
+
+    const filename = makeFilename(audioInfo);
+    console.log('[Popup] Filename:', filename);
+    const downloadUrl = audioInfo.sitePlayableFilePath;
+
+    if (!downloadUrl) {
+      showStatus(t.errorNoLink, 'error');
+      setLoading(false);
+      return;
+    }
+
+    // Download
+    chrome.downloads.download({
+      url: downloadUrl,
+      filename: filename,
+      saveAs: false
+    }, function(downloadId) {
+      if (chrome.runtime.lastError) {
+        showStatus(t.errorGeneral + chrome.runtime.lastError.message, 'error');
+        setLoading(false);
+      } else {
+        showStatus(t.statusSuccess + audioInfo.songName, 'success');
+        setLoading(false);
+      }
+    });
+  }
+
+  // Download SFX (separate handler)
+  async function downloadSfx(currentUrl, inputUrl) {
+    const t = translations[currentLang];
+    let sfxInfo = null;
+
+    // Simple approach: Just get current/last played
+    // Content script already has the correct name from instant detection
+    sfxInfo = await getCurrentPlaying();
+    
+    console.log('[Popup] SFX Info:', sfxInfo);
+
+    // Strategy fallbacks only if no info at all
+    if (!sfxInfo) {
+      // User provided specific SFX URL
+      if (inputUrl && inputUrl.includes('/sfx/') && !inputUrl.endsWith('/sfx')) {
+        const sfxId = extractIdFromUrl(inputUrl);
+        if (sfxId && !isNaN(sfxId)) {
+          sfxInfo = await getAudioInfo(sfxId, true);
+        }
+      }
+      
+      // Current page is specific SFX
+      if (!sfxInfo && currentUrl.includes('/sfx/') && !currentUrl.endsWith('/sfx')) {
+        const sfxId = extractIdFromUrl(currentUrl);
+        if (sfxId && !isNaN(sfxId)) {
+          sfxInfo = await getAudioInfo(sfxId, true);
+        }
+      }
+      
+      // Last resort: scrape
+      if (!sfxInfo) {
+        sfxInfo = await getAnyAudioFromPage();
+      }
+    }
+
+    if (!sfxInfo) {
+      showStatus(t.errorNoSong, 'error');
+      setLoading(false);
+      return;
+    }
+
+    // CRITICAL: If we have name but no URL, fetch URL using the ID
+    if (sfxInfo.songName && !sfxInfo.sitePlayableFilePath && sfxInfo.songId) {
+      console.log('[Popup] Have name but no URL, fetching URL for ID:', sfxInfo.songId);
+      const urlData = await getAudioInfo(sfxInfo.songId, sfxInfo.isSfx);
+      if (urlData && urlData.sitePlayableFilePath) {
+        // Merge: keep the good name, add the URL
+        sfxInfo.sitePlayableFilePath = urlData.sitePlayableFilePath;
+        console.log('[Popup] ✅ Fetched URL:', urlData.sitePlayableFilePath);
+      }
+    }
+
+    // If still no URL, wait and retry once
+    if (!sfxInfo.sitePlayableFilePath) {
+      showStatus('Đợi audio load...', 'info');
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      const retry = await getCurrentPlaying();
+      if (retry && retry.sitePlayableFilePath) {
+        sfxInfo = retry;
+      }
+    }
+
+    // Final URL check
+    if (!sfxInfo.sitePlayableFilePath) {
+      showStatus('Không có URL download. Hãy play SFX trước!', 'error');
+      setLoading(false);
+      return;
+    }
+
+    console.log('[Popup] Downloading:', sfxInfo.songName || 'Unknown');
+    showStatus(t.statusDownloading, 'info');
+
+    const filename = makeFilename(sfxInfo);
+    console.log('[Popup] Filename:', filename);
+    
+    chrome.downloads.download({
+      url: sfxInfo.sitePlayableFilePath,
+      filename: filename,
+      saveAs: false
+    }, function(downloadId) {
+      if (chrome.runtime.lastError) {
+        showStatus(t.errorGeneral + chrome.runtime.lastError.message, 'error');
+        setLoading(false);
+      } else {
+        showStatus(t.statusSuccess + (sfxInfo.songName || 'SFX'), 'success');
+        setLoading(false);
+      }
+    });
+  }
 
   async function getAudioInfo(id, isSfx) {
     return new Promise((resolve) => {

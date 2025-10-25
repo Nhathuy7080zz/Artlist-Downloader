@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Artlist Downloader",
-  "version": "2.1",
+  "version": "2.2",
   "description": "Download High-Quality Music & Sound Effects from Artlist.io",
   "permissions": [
     "activeTab",
