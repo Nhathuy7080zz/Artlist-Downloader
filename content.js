@@ -1,7 +1,7 @@
 // Content script - Artlist Downloader v3 (Production)
 // Supports: Music & Sound Effects
 
-const DEBUG = true; // Set to true to enable console logs
+const DEBUG = false; // Set to true to enable console logs
 const log = (...args) => DEBUG && console.log('[Artlist DL]', ...args);
 const warn = (...args) => DEBUG && console.warn('[Artlist DL]', ...args);
 const error = (...args) => DEBUG && console.error('[Artlist DL]', ...args);
@@ -1780,3 +1780,4 @@ async function scrapeSongDataFromPage() {
     return null;
   }
 }
+
